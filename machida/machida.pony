@@ -41,7 +41,8 @@ use "wallaroo/core/windows"
 // these are included because of wallaroo issue #814
 use "serialise"
 use "wallaroo_labs/mort"
-use "wallaroo_labs/time" // yet another case of the same(?)
+use "wallaroo_labs/time"
+
 
 use @set_command_line_args[I32](module: ModuleP, args: Pointer[U8] val)
 use @set_user_serialization_fns[None](module: Pointer[U8] tag)
