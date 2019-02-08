@@ -27,6 +27,7 @@ use "wallaroo/core/aggregations"
 use "wallaroo/core/partitioning"
 use "wallaroo/core/sink"
 use "wallaroo/core/sink/connector_sink"
+use "wallaroo/core/sink/connector_sink2"
 use "wallaroo/core/sink/kafka_sink"
 use "wallaroo/core/sink/tcp_sink"
 use "wallaroo/core/source"
@@ -457,6 +458,7 @@ class PyTCPEncoder is TCPSinkEncoder[PyData val]
     _sink_encoder = sink_encoder
 
   fun apply(data: PyData val, wb: Writer): Array[ByteSeq] val =>
+    @printf[I32]("QQQ SLF: call sink_encoder_encode at line %d\n".cstring(), __loc.line())
     let byte_buffer = Machida.sink_encoder_encode(_sink_encoder, data.obj())
     if not Machida.is_py_none(byte_buffer) then
       let byte_string = @PyString_AsString(byte_buffer)
@@ -497,6 +499,7 @@ class PyKafkaEncoder is KafkaSinkEncoder[PyData val]
   fun apply(data: PyData val, wb: Writer):
     (Array[ByteSeq] val, (Array[ByteSeq] val | None), (None | KafkaPartitionId))
   =>
+    @printf[I32]("QQQ SLF: call sink_encoder_encode at line %d\n".cstring(), __loc.line())
     let out_and_key_and_part_id = Machida.sink_encoder_encode(_sink_encoder, data.obj())
     // `out_and_key_and_part_id` is a tuple of `(out, key, part_id)`, where `out` is a
     // string and key is `None` or a string and `part_id` is `None` or a KafkaPartitionId.
@@ -548,6 +551,7 @@ class PyConnectorEncoder is ConnectorSinkEncoder[PyData val]
     _sink_encoder = sink_encoder
 
   fun apply(data: PyData val, wb: Writer): Array[ByteSeq] val =>
+    @printf[I32]("QQQ SLF: call sink_encoder_encode at line %d\n".cstring(), __loc.line())
     let byte_buffer = Machida.sink_encoder_encode(_sink_encoder, data.obj())
     if not Machida.is_py_none(byte_buffer) then
       let byte_string = @PyString_AsString(byte_buffer)
@@ -558,6 +562,7 @@ class PyConnectorEncoder is ConnectorSinkEncoder[PyData val]
           Array[U8].from_cpointer(@PyString_AsString(byte_buffer),
             @PyString_Size(byte_buffer)).clone()
         end
+        @printf[I32]("QQQ SLF: call sink_encoder_encode arr.size %d\n".cstring(), arr.size())
         Machida.dec_ref(byte_buffer)
         wb.write(arr)
       else
@@ -677,6 +682,7 @@ primitive Machida
   fun sink_encoder_encode(sink_encoder: Pointer[U8] val, data: Pointer[U8] val):
     Pointer[U8] val
   =>
+    @printf[I32]("QQQ SLF: whoa sink_encoder_encode\n".cstring())
     let r = @sink_encoder_encode(sink_encoder, data)
     print_errors()
     if r.is_null() then Fail() end
@@ -1022,8 +1028,7 @@ primitive _SinkConfig
       String.copy_cstring(@PyString_AsString(@PyTuple_GetItem(sink_config_tuple, 1)))
     end
 
-    match name
-    | "tcp" =>
+    if name == "tcp" then
       let host = recover val
         String.copy_cstring(@PyString_AsString(@PyTuple_GetItem(sink_config_tuple, 2)))
       end
@@ -1039,7 +1044,11 @@ primitive _SinkConfig
       end
 
       TCPSinkConfig[PyData val](encoder, host, port)
-    | "kafka-internal" =>
+    elseif name == "kafka-internal" then
+      let kafka_sink_name = recover val
+        String.copy_cstring(@PyString_AsString(@PyTuple_GetItem(sink_config_tuple, 1)))
+      end
+
       let encoderp = @PyTuple_GetItem(sink_config_tuple, 2)
       Machida.inc_ref(encoderp)
       let encoder = recover val
@@ -1050,7 +1059,7 @@ primitive _SinkConfig
       let ksco = ksclip.parse_options(env.args)?
 
       KafkaSinkConfig[PyData val](encoder, consume ksco, (env.root as TCPConnectionAuth))
-    | "kafka" =>
+    elseif name == "kafka" then
       let ksco = _kafka_config_options(sink_config_tuple)
 
       let encoderp = @PyTuple_GetItem(sink_config_tuple, 7)
@@ -1060,7 +1069,7 @@ primitive _SinkConfig
       end
 
       KafkaSinkConfig[PyData val](encoder, consume ksco, (env.root as TCPConnectionAuth))
-    | "sink_connector" =>
+    elseif (name == "sink_connector") or (name == "sink_connector2") then
       let host = recover val
         String.copy_cstring(@PyString_AsString(@PyTuple_GetItem(sink_config_tuple, 3)))
       end
@@ -1075,7 +1084,15 @@ primitive _SinkConfig
         PyConnectorEncoder(encoderp)
       end
 
-      ConnectorSinkConfig[PyData val](encoder, host, port)
+      if name == "sink_connector" then
+        ConnectorSinkConfig[PyData val](encoder, host, port)
+      else
+        let cookie = recover val
+          String.copy_cstring(@PyString_AsString(@PyTuple_GetItem(sink_config_tuple, 5)))
+        end
+        @printf[I32]("ConnectorSink2Config: host %s port %s cookie %s\n".cstring(), host.cstring(), port.cstring(), cookie.cstring())
+        ConnectorSink2Config[PyData val](encoder, host, port, cookie)
+      end
     else
       error
     end

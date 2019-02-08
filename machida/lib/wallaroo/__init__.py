@@ -292,7 +292,7 @@ def _wallaroo_wrap(name, func, base_cls, **kwargs):
             class C(base_cls):
                 def encode(self, data, event_time=0, key=None):
                     encoded = func(data)
-                    if isinstance(event_time, dt.datetime):
+                    if isinstance(event_time, datetime.datetime):
                         # We'll assume naive datetime values should be treated as
                         # UTC. Python's brain-dead datetime package is mostly
                         # useless for fixing this without a mountain of caveats
@@ -312,6 +312,12 @@ def _wallaroo_wrap(name, func, base_cls, **kwargs):
                         encoded_key,
                         encoded) # final payload, variable size as formatted above
 
+        # Connector2Encoder
+        elif issubclass(base_cls, ConnectorEncoder2):
+            class C(base_cls):
+                def encode(self, data):
+                    return func(data)
+ 
         # OctetEncoder
         elif issubclass(base_cls, OctetEncoder):
             class C(base_cls):
@@ -447,6 +453,9 @@ class ConnectorEncoder(Encoder):
             encoded_key,
             encoded_data) # final payload, variable size as formatted above
 
+class ConnectorEncoder2(Encoder):
+    def _encode(self, encoded_data, event_time=0, key=None):
+        return encoded_data
 
 def computation(name):
     def wrapped(func):

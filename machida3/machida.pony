@@ -27,6 +27,7 @@ use "wallaroo/core/aggregations"
 use "wallaroo/core/partitioning"
 use "wallaroo/core/sink"
 use "wallaroo/core/sink/connector_sink"
+use "wallaroo/core/sink/connector_sink2"
 use "wallaroo/core/sink/kafka_sink"
 use "wallaroo/core/sink/tcp_sink"
 use "wallaroo/core/source"
@@ -1049,8 +1050,7 @@ primitive _SinkConfig
       Machida.py_bytes_or_unicode_to_pony_string(@PyTuple_GetItem(sink_config_tuple, 1))
     end
 
-    match type_name
-    | "tcp" =>
+    if name == "tcp" then
       let host = recover val
         Machida.py_bytes_or_unicode_to_pony_string(@PyTuple_GetItem(sink_config_tuple, 2))
       end
@@ -1066,7 +1066,11 @@ primitive _SinkConfig
       end
 
       TCPSinkConfig[PyData val](encoder, host, port)
-    | "kafka-internal" =>
+    elseif name == "kafka-internal" then
+      let kafka_sink_name = recover val
+        Machida.py_bytes_or_unicode_to_pony_string(@PyTuple_GetItem(sink_config_tuple, 1))
+      end
+
       let encoderp = @PyTuple_GetItem(sink_config_tuple, 2)
       Machida.inc_ref(encoderp)
       let encoder = recover val
@@ -1077,7 +1081,7 @@ primitive _SinkConfig
       let ksco = ksclip.parse_options(env.args)?
 
       KafkaSinkConfig[PyData val](encoder, consume ksco, (env.root as TCPConnectionAuth))
-    | "kafka" =>
+    elseif name == "kafka" then
       let ksco = _kafka_config_options(sink_config_tuple)
 
       let encoderp = @PyTuple_GetItem(sink_config_tuple, 7)
@@ -1087,7 +1091,7 @@ primitive _SinkConfig
       end
 
       KafkaSinkConfig[PyData val](encoder, consume ksco, (env.root as TCPConnectionAuth))
-    | "sink_connector" =>
+    elseif (name == "sink_connector") or (name == "sink_connector2") then
       let host = recover val
         Machida.py_bytes_or_unicode_to_pony_string(@PyTuple_GetItem(sink_config_tuple, 3))
       end
@@ -1102,7 +1106,11 @@ primitive _SinkConfig
         PyConnectorEncoder(encoderp)
       end
 
-      ConnectorSinkConfig[PyData val](encoder, host, port)
+      if name == "sink_connector" then
+        ConnectorSinkConfig[PyData val](encoder, host, port)
+      else
+        ConnectorSink2Config[PyData val](encoder, host, port)
+      end
     else
       error
     end

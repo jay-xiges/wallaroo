@@ -199,6 +199,7 @@ extern PyObject *sink_encoder_encode(PyObject *sink_encoder, PyObject *data)
 {
   PyObject *pFunc, *pArgs, *pValue;
 
+  printf("QQQ SLF: C sink_encoder_encode\n");
   pFunc = PyObject_GetAttrString(sink_encoder, "encode");
   pValue = PyObject_CallFunctionObjArgs(pFunc, data, NULL);
   Py_DECREF(pFunc);

@@ -393,7 +393,7 @@ In the handshake state the following frame types are valid:
 
 In the streaming state the following frame types are valid:
 
-   - NOFITY: Connector -> Worker
+   - NOTIFY: Connector -> Worker
    - NOTIFY_ACK: Worker -> Connector
    - MESSAGE: Connector -> Worker
    - ACK: Worker -> Connector

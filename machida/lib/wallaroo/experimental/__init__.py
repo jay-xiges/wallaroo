@@ -61,6 +61,11 @@ def stream_message_encoder(func):
     C = wallaroo._wallaroo_wrap(func.__name__, func, wallaroo.ConnectorEncoder)
     return C()
 
+def stream_message_encoder2(func):
+    wallaroo._validate_arity_compatability(func.__name__, func, 1)
+    C = wallaroo._wallaroo_wrap(func.__name__, func, wallaroo.ConnectorEncoder2)
+    return C()
+
 
 class SourceConnectorConfig(object):
     def __init__(self, name, encoder, decoder, port, cookie,
@@ -90,6 +95,19 @@ class SinkConnectorConfig(object):
 
     def to_tuple(self):
         return ("sink_connector", self._name, self._host, str(self._port), self._encoder, self._decoder)
+
+
+class SinkConnector2Config(object):
+    def __init__(self, name, encoder, decoder, port, cookie, host='127.0.0.1'):
+        self._name = name
+        self._host = host
+        self._port = port
+        self._cookie = cookie
+        self._encoder = encoder
+        self._decoder = decoder
+
+    def to_tuple(self):
+        return ("sink_connector2", self._name, self._host, str(self._port), self._encoder, self._decoder, self._cookie)
 
 
 class BaseConnector(object):

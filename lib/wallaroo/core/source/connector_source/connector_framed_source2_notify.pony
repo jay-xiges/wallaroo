@@ -22,7 +22,7 @@ use "collections"
 use "time"
 use "wallaroo_labs/time"
 use "wallaroo_labs/bytes"
-use cwm = "wallaroo_labs/connector_wire_messages"
+use cp = "wallaroo_labs/connector_protocol"
 use "wallaroo/core/boundary"
 use "wallaroo/core/common"
 use "wallaroo/core/partitioning"
@@ -35,20 +35,6 @@ use "wallaroo/core/metrics"
 use "wallaroo/core/routing"
 use "wallaroo/core/source"
 use "wallaroo/core/topology"
-
-type _ProtoFsmState is (_ProtoFsmConnected | _ProtoFsmHandshake |
-                        _ProtoFsmStreaming | _ProtoFsmError |
-                        _ProtoFsmDisconnected)
-primitive _ProtoFsmConnected
-  fun apply(): U8 => 1
-primitive _ProtoFsmHandshake
-  fun apply(): U8 => 2
-primitive _ProtoFsmStreaming
-  fun apply(): U8 => 3
-primitive _ProtoFsmError
-  fun apply(): U8 => 4
-primitive _ProtoFsmDisconnected
-  fun apply(): U8 => 5
 
 class _StreamState
   var pending_query: Bool
@@ -86,7 +72,7 @@ class ConnectorSource2Notify[In: Any val]
   let _stream_map: Map[U64, _StreamState] = _stream_map.create()
   var _session_active: Bool = false
   var _session_tag: USize = 0
-  var _fsm_state: _ProtoFsmState = _ProtoFsmDisconnected
+  var _fsm_state: cp.ConnectorProtoFsmState = cp.ConnectorProtoFsmDisconnected
   let _cookie: String
   let _max_credits: U32
   let _refill_credits: U32
@@ -167,7 +153,7 @@ class ConnectorSource2Notify[In: Any val]
 
     _credits = _credits - 1
     if (_credits <= _refill_credits) and
-        (_fsm_state is _ProtoFsmStreaming) then
+        (_fsm_state is cp.ConnectorProtoFsmStreaming) then
       // Our client's credits are running low and we haven't replenished
       // them after barrier_complete() processing.  Replenish now.
       _send_ack()
@@ -176,13 +162,13 @@ class ConnectorSource2Notify[In: Any val]
     try
       let data': Array[U8] val = consume data
       @printf[I32]("NH: decode data: %s\n".cstring(), _print_array[U8](data').cstring())
-      let connector_msg = cwm.Frame.decode(consume data')?
+      let connector_msg = cp.Frame.decode(consume data')?
       match connector_msg
-      | let m: cwm.HelloMsg =>
+      | let m: cp.HelloMsg =>
         ifdef "trace" then
           @printf[I32]("TRACE: got HelloMsg\n".cstring())
         end
-        if _fsm_state isnt _ProtoFsmConnected then
+        if _fsm_state isnt cp.ConnectorProtoFsmConnected then
           @printf[I32]("ERROR: %s.received_connector_msg: state is %d\n".cstring(),
             __loc.type_name().cstring(), _fsm_state())
           Fail()
@@ -205,30 +191,30 @@ class ConnectorSource2Notify[In: Any val]
         // by this connector's one & only pipeline as defined by the
         // app's pipeline definition.
 
-        _fsm_state = _ProtoFsmHandshake
+        _fsm_state = cp.ConnectorProtoFsmHandshake
         (_active_stream_registry as ConnectorSource2Listener[In]).
           get_all_streams(_session_tag,
             _connector_source as ConnectorSource2[In])
         return _continue_perhaps(source)
 
-      | let m: cwm.OkMsg =>
+      | let m: cp.OkMsg =>
         ifdef "trace" then
           @printf[I32]("TRACE: got OkMsg\n".cstring())
         end
         return _to_error_state(source, "Invalid message: ok")
 
-      | let m: cwm.ErrorMsg =>
+      | let m: cp.ErrorMsg =>
         @printf[I32]("Client sent us ERROR msg: %s\n".cstring(),
           m.message.cstring())
         source.close()
         return _continue_perhaps(source)
 
-      | let m: cwm.NotifyMsg =>
+      | let m: cp.NotifyMsg =>
         ifdef "trace" then
           @printf[I32]("TRACE: got NotifyMsg: %lu %s %lu\n".cstring(),
             m.stream_id, m.stream_name.cstring(), m.point_of_ref)
         end
-        if _fsm_state isnt _ProtoFsmStreaming then
+        if _fsm_state isnt cp.ConnectorProtoFsmStreaming then
           return _to_error_state(source, "Bad protocol FSM state")
         end
 
@@ -239,27 +225,27 @@ class ConnectorSource2Notify[In: Any val]
                 m.point_of_ref, _connector_source as ConnectorSource2[In])
             _stream_map(m.stream_id) = _StreamState(true, 0, 0, 0, 0)
           else
-            _send_reply(source, cwm.NotifyAckMsg(false, m.stream_id, 0))
+            _send_reply(source, cp.NotifyAckMsg(false, m.stream_id, 0))
             return _continue_perhaps(source)
           end
         else
           Fail()
         end
 
-      | let m: cwm.NotifyAckMsg =>
+      | let m: cp.NotifyAckMsg =>
         ifdef "trace" then
           @printf[I32]("TRACE: got NotifyAckMsg\n".cstring())
         end
         return _to_error_state(source, "Invalid message: notify_ack")
 
-      | let m: cwm.MessageMsg =>
+      | let m: cp.MessageMsg =>
         ifdef "trace" then
           @printf[I32]("TRACE: got MessageMsg\n".cstring())
         end
-        if _fsm_state isnt _ProtoFsmStreaming then
+        if _fsm_state isnt cp.ConnectorProtoFsmStreaming then
           return _to_error_state(source, "Bad protocol FSM state")
         end
-        if not cwm.FlagsAllowed(m.flags) then
+        if not cp.FlagsAllowed(m.flags) then
           return _to_error_state(source, "Bad MessageMsg flags")
         end
 
@@ -278,10 +264,10 @@ class ConnectorSource2Notify[In: Any val]
               return _to_error_state(source, "Duplicate stream_id " + stream_id.string())
             end
 
-            let msg_id' = if m.message_id is None then "<None>" else (m.message_id as cwm.MessageId).string() end
-            let event_time' = if m.event_time is None then "<None>" else (m.event_time as cwm.EventTimeType).string() end
-            let key' = if m.key is None then "<None>" else _print_array[U8](m.key as cwm.KeyBytes) end
-            let message' = if m.message is None then "<None>" else _print_array[U8](m.message as cwm.MessageBytes) end
+            let msg_id' = if m.message_id is None then "<None>" else (m.message_id as cp.MessageId).string() end
+            let event_time' = if m.event_time is None then "<None>" else (m.event_time as cp.EventTimeType).string() end
+            let key' = if m.key is None then "<None>" else _print_array[U8](m.key as cp.KeyBytes) end
+            let message' = if m.message is None then "<None>" else _print_array[U8](m.message as cp.MessageBytes) end
             ifdef "trace" then
               @printf[I32]("TRACE: MSG: stream-id %llu flags %u msg_id %s event_time %s key %s message %s\n".cstring(), stream_id, m.flags, msg_id'.cstring(), event_time'.cstring(), key'.cstring(), message'.cstring())
             end
@@ -289,7 +275,7 @@ class ConnectorSource2Notify[In: Any val]
             try
               @printf[I32]("NH: processing body 1\n".cstring())
               let msg_id = try
-                m.message_id as cwm.MessageId
+                m.message_id as cp.MessageId
               else
                 0
               end
@@ -303,7 +289,7 @@ class ConnectorSource2Notify[In: Any val]
               end
 
               @printf[I32]("NH: processing body 3\n".cstring())
-              if cwm.Eos.is_set(m.flags) then
+              if cp.Eos.is_set(m.flags) then
                 @printf[I32]("NH: processing body 3: EOS\n".cstring())
                 (_active_stream_registry as ConnectorSource2Listener[In]).stream_update(
                   stream_id, s.barrier_checkpoint_id, s.barrier_last_message_id,
@@ -312,15 +298,15 @@ class ConnectorSource2Notify[In: Any val]
               end
 
               @printf[I32]("NH: processing body 4\n".cstring())
-              if cwm.Boundary.is_set(m.flags) then
+              if cp.Boundary.is_set(m.flags) then
                 None
               else
                 try
-                  let bytes = match (m.message as cwm.MessageBytes)
+                  let bytes = match (m.message as cp.MessageBytes)
                   | let str: String      => str.array()
                   | let b: Array[U8] val => b
                   end
-                  if cwm.Eos.is_set(m.flags) or (bytes.size() == 0) then
+                  if cp.Eos.is_set(m.flags) or (bytes.size() == 0) then
                     None
                   else
                     _handler.decode(bytes)?
@@ -373,13 +359,13 @@ class ConnectorSource2Notify[In: Any val]
           pipeline_time_spent, key_string, source, decoded, s,
           m.message_id, m.flags)
 
-      | let m: cwm.AckMsg =>
+      | let m: cp.AckMsg =>
         ifdef "trace" then
           @printf[I32]("TRACE: got AckMsg\n".cstring())
         end
         return _to_error_state(source, "Invalid message: ack")
 
-      | let m: cwm.RestartMsg =>
+      | let m: cp.RestartMsg =>
         ifdef "trace" then
           @printf[I32]("TRACE: got RestartMsg\n".cstring())
         end
@@ -403,8 +389,8 @@ class ConnectorSource2Notify[In: Any val]
     source: ConnectorSource2[In] ref,
     decoded: (In val| None val),
     s: _StreamState,
-    message_id: (cwm.MessageId|None),
-    flags: cwm.Flags): Bool
+    message_id: (cp.MessageId|None),
+    flags: cp.Flags): Bool
    =>
     let decode_end_ts = Time.nanos()
     _metrics_reporter.step_metric(_pipeline_name,
@@ -444,8 +430,8 @@ class ConnectorSource2Notify[In: Any val]
 
     match message_id
     | let m_id: U64 =>
-      if not (cwm.Ephemeral.is_set(flags) or
-        cwm.UnstableReference.is_set(flags)) then
+      if not (cp.Ephemeral.is_set(flags) or
+        cp.UnstableReference.is_set(flags)) then
         s.last_message_id = m_id
       end
     end
@@ -498,12 +484,12 @@ class ConnectorSource2Notify[In: Any val]
 
   fun ref accepted(source: ConnectorSource2[In] ref) =>
     @printf[I32]((_source_name + ": accepted a connection\n").cstring())
-    if _fsm_state isnt _ProtoFsmDisconnected then
+    if _fsm_state isnt cp.ConnectorProtoFsmDisconnected then
       @printf[I32]("ERROR: %s.connected: state is %d\n".cstring(),
         __loc.type_name().cstring(), _fsm_state())
       Fail()
     end
-    _fsm_state = _ProtoFsmConnected
+    _fsm_state = cp.ConnectorProtoFsmConnected
     _header = true
     _session_active = true
     _session_tag = _session_tag + 1
@@ -515,7 +501,7 @@ class ConnectorSource2Notify[In: Any val]
   fun ref closed(source: ConnectorSource2[In] ref) =>
     @printf[I32]("ConnectorSource2 connection closed 0x%lx\n".cstring(), source)
     _session_active = false
-    _fsm_state = _ProtoFsmDisconnected
+    _fsm_state = cp.ConnectorProtoFsmDisconnected
     _clear_stream_map()
 
   fun ref throttled(source: ConnectorSource2[In] ref) =>
@@ -655,7 +641,7 @@ class ConnectorSource2Notify[In: Any val]
         end
       end
 
-      if _fsm_state is _ProtoFsmStreaming then
+      if _fsm_state is cp.ConnectorProtoFsmStreaming then
         // Send an Ack message to replenish credits
         _send_ack()
       end
@@ -700,7 +686,7 @@ class ConnectorSource2Notify[In: Any val]
             false
           end
         end
-      let m = cwm.NotifyAckMsg(success_reply, stream_id, point_of_reference)
+      let m = cp.NotifyAckMsg(success_reply, stream_id, point_of_reference)
       _send_reply(_connector_source, m)
     else
       Fail()
@@ -720,27 +706,27 @@ class ConnectorSource2Notify[In: Any val]
 
     let w: Writer = w.create()
     _credits = _max_credits
-     _send_reply(_connector_source, cwm.OkMsg(_credits, data))
+     _send_reply(_connector_source, cp.OkMsg(_credits, data))
 
-    _fsm_state = _ProtoFsmStreaming
+    _fsm_state = cp.ConnectorProtoFsmStreaming
 
   fun ref _to_error_state(source: (ConnectorSource2[In] ref|None), msg: String): Bool
   =>
-    _send_reply(source, cwm.ErrorMsg(msg))
+    _send_reply(source, cp.ErrorMsg(msg))
 
-    _fsm_state = _ProtoFsmError
+    _fsm_state = cp.ConnectorProtoFsmError
     try (source as ConnectorSource2[In] ref).close() else Fail() end
     _continue_perhaps2()
 
   fun ref _send_ack() =>
     let new_credits = _max_credits - _credits
-    let cs: Array[(cwm.StreamId, cwm.PointOfRef)] trn =
+    let cs: Array[(cp.StreamId, cp.PointOfRef)] trn =
       recover trn cs.create() end
 
     for (stream_id, s) in _stream_map.pairs() do
       cs.push((stream_id, s.barrier_last_message_id))
     end
-    _send_reply(_connector_source, cwm.AckMsg(new_credits, consume cs))
+    _send_reply(_connector_source, cp.AckMsg(new_credits, consume cs))
     _credits = _credits + new_credits
 
   fun ref _send_restart() =>
@@ -748,18 +734,18 @@ class ConnectorSource2Notify[In: Any val]
       @printf[I32]("TRACE: %s.%s()\n".cstring(),
         __loc.type_name().cstring(), __loc.method_name().cstring())
     end
-    _send_reply(_connector_source, cwm.RestartMsg)
+    _send_reply(_connector_source, cp.RestartMsg)
     try (_connector_source as ConnectorSource2[In] ref).close() else Fail() end
     // The .close() method ^^^ calls our closed() method which will
     // twiddle all of the appropriate state variables.
 
-  fun _send_reply(source: (ConnectorSource2[In] ref|None), msg: cwm.Message) =>
+  fun _send_reply(source: (ConnectorSource2[In] ref|None), msg: cp.Message) =>
     match source
     | let s: ConnectorSource2[In] ref =>
       let w1: Writer = w1.create()
       let w2: Writer = w2.create()
 
-      let b1 = cwm.Frame.encode(msg, w1)
+      let b1 = cp.Frame.encode(msg, w1)
       w2.u32_be(b1.size().u32())
       @printf[I32]("b1: %s\n".cstring(), _print_array[U8](b1).cstring())
       w2.writev([b1])

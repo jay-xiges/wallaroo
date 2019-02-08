@@ -32,6 +32,7 @@ except:
 class UDPHandler(SocketServer.BaseRequestHandler):
     def handle(self):
         data = self.request[0].strip()
+        print('run_sample UDPHandler got something:')
         print(data)
 
 
