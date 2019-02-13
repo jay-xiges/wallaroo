@@ -61,6 +61,7 @@ trait BasicPipeline
   fun graph(): this->Dag[Stage]
   fun is_finished(): Bool
   fun size(): USize
+  fun worker_source_configs(): this->Map[String, WorkerSourceConfig]
 
 type Stage is (RunnerBuilder | SinkBuilder | Array[SinkBuilder] val |
   SourceConfigWrapper | RandomPartitionerBuilder | KeyPartitionerBuilder)
@@ -68,7 +69,11 @@ type Stage is (RunnerBuilder | SinkBuilder | Array[SinkBuilder] val |
 class Pipeline[Out: Any val] is BasicPipeline
   let _stages: Dag[Stage]
   let _dag_sink_ids: Array[RoutingId]
+  // map from source name to worker specific source config
+  var _worker_source_configs: Map[String, WorkerSourceConfig] =
+    _worker_source_configs.create()
   var _finished: Bool
+
 
   var _last_is_shuffle: Bool
   var _last_is_key_by: Bool
@@ -86,9 +91,12 @@ class Pipeline[Out: Any val] is BasicPipeline
     let sc_wrapper = SourceConfigWrapper(n, source_config)
     let source_id' = _stages.add_node(sc_wrapper)
     _dag_sink_ids.push(source_id')
+    _worker_source_configs.update(sc_wrapper.name(),
+      source_config.worker_source_config())
 
   new create(stages: Dag[Stage] = Dag[Stage],
     dag_sink_ids: Array[RoutingId] = Array[RoutingId],
+    worker_source_configs': Map[String, WorkerSourceConfig],
     local_routing: Bool,
     finished: Bool = false,
     last_is_shuffle: Bool = false,
@@ -96,6 +104,7 @@ class Pipeline[Out: Any val] is BasicPipeline
   =>
     _stages = stages
     _dag_sink_ids = dag_sink_ids
+    _worker_source_configs = worker_source_configs'
     _finished = finished
     _last_is_shuffle = last_is_shuffle
     _last_is_key_by = last_is_key_by
@@ -120,17 +129,19 @@ class Pipeline[Out: Any val] is BasicPipeline
       // Successful merge
       try
         _stages.merge(pipeline._stages)?
+        _worker_source_configs.concat(pipeline.worker_source_configs().pairs())
       else
         // We should have ruled this out through the if branches
         Unreachable()
       end
       _dag_sink_ids.append(pipeline._dag_sink_ids)
-      return Pipeline[(Out | MergeOut)](_stages, _dag_sink_ids
+      return Pipeline[(Out | MergeOut)](_stages, _dag_sink_ids,
+        _worker_source_configs
         where local_routing = _local_routing,
         last_is_shuffle = _last_is_shuffle,
         last_is_key_by = _last_is_key_by)
     end
-    Pipeline[(Out | MergeOut)](_stages, _dag_sink_ids
+    Pipeline[(Out | MergeOut)](_stages, _dag_sink_ids, _worker_source_configs
       where local_routing = _local_routing)
 
   fun ref to[Next: Any val](comp: Computation[Out, Next],
@@ -148,11 +159,11 @@ class Pipeline[Out: Any val] is BasicPipeline
       else
         Fail()
       end
-      Pipeline[Next](_stages, [node_id]
+      Pipeline[Next](_stages, [node_id], _worker_source_configs
         where local_routing = _local_routing)
     else
       _try_add_to_finished_pipeline()
-      Pipeline[Next](_stages, _dag_sink_ids
+      Pipeline[Next](_stages, _dag_sink_ids, _worker_source_configs
         where local_routing = _local_routing)
     end
 
@@ -167,11 +178,11 @@ class Pipeline[Out: Any val] is BasicPipeline
       else
         Fail()
       end
-      Pipeline[Out](_stages, [node_id]
+      Pipeline[Out](_stages, [node_id], _worker_source_configs
         where local_routing = _local_routing, finished = true)
     else
       _try_add_to_finished_pipeline()
-      Pipeline[Out](_stages, _dag_sink_ids
+      Pipeline[Out](_stages, _dag_sink_ids, _worker_source_configs
         where local_routing = _local_routing)
     end
 
@@ -193,11 +204,11 @@ class Pipeline[Out: Any val] is BasicPipeline
       else
         Fail()
       end
-      Pipeline[Out](_stages, [node_id]
+      Pipeline[Out](_stages, [node_id], _worker_source_configs
         where local_routing = _local_routing, finished = true)
     else
       _try_add_to_finished_pipeline()
-      Pipeline[Out](_stages, _dag_sink_ids
+      Pipeline[Out](_stages, _dag_sink_ids, _worker_source_configs
         where local_routing = _local_routing)
     end
 
@@ -213,11 +224,11 @@ class Pipeline[Out: Any val] is BasicPipeline
       else
         Fail()
       end
-      Pipeline[Out](_stages, [node_id]
+      Pipeline[Out](_stages, [node_id], _worker_source_configs
         where local_routing = local_routing, last_is_key_by = true)
     else
       _try_add_to_finished_pipeline()
-      Pipeline[Out](_stages, _dag_sink_ids
+      Pipeline[Out](_stages, _dag_sink_ids, _worker_source_configs
         where local_routing = local_routing)
     end
 
@@ -239,6 +250,9 @@ class Pipeline[Out: Any val] is BasicPipeline
     collect(where local_routing = true)
 
   fun graph(): this->Dag[Stage] => _stages
+
+  fun worker_source_configs(): this->Map[String, WorkerSourceConfig] =>
+    _worker_source_configs
 
   fun size(): USize => _stages.size()
 
