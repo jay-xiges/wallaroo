@@ -25,7 +25,7 @@ import wallaroo.experimental
 
 def application_setup(args):
     #out_host, out_port = wallaroo.tcp_parse_output_addrs(args)[0]
-    celsius_feed = wallaroo.experimental.SourceConnector2Config(
+    celsius_feed = wallaroo.experimental.SourceConnectorConfig(
         "celsius_feed",
         encoder=encode_feed,
         decoder=decode_feed,
