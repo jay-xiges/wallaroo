@@ -120,6 +120,7 @@ class AsyncServer(asynchat.async_chat, object):
             self.write(ack)
         if self.received_count % 1000 == 0:
             # send a restart every 1000 messages
+            print('PERIODIC RESTART, what could possibly go wrong?')
             self.write(cwm.Restart())
 
     def handle_error(self):

@@ -183,7 +183,10 @@ class ConnectorSink2Notify
         _error_and_close(conn, "Bad FSM State: F" + _fsm_state().string())
       end
     | let m: cp.RestartMsg =>
-      _error_and_close(conn, "Bad FSM State: G" + _fsm_state().string())
+      ifdef "trace" then
+        @printf[I32]("TRACE: got restart message, closing connection\n".cstring())
+      end
+      conn.close()
     end
 
   fun ref _error_and_close(conn: WallarooOutgoingNetworkActor ref,
