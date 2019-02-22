@@ -38,11 +38,11 @@ trait _EventLogPhase
     Fail()
 
   fun ref checkpoint_state(resilient_id: RoutingId,
-    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val)
+    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val,
+    is_last_entry: Bool)
   =>
     @printf[I32]("checkpoint_state() for resilient %s, checkpoint_id %s\n"
-      .cstring(), resilient_id.string().cstring(),
-      checkpoint_id.string().cstring())
+      .cstring(),resilient_id.string().cstring(),checkpoint_id.string().cstring())
     _invalid_call()
     Fail()
 
@@ -129,7 +129,8 @@ class _WaitingForCheckpointInitiationEventLogPhase is _EventLogPhase
     end
 
   fun ref checkpoint_state(resilient_id: RoutingId,
-    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val)
+    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val,
+    is_last_entry: Bool)
   =>
     ifdef "checkpoint_trace" then
       @printf[I32]("_WaitingForCheckpointInitiationEventLogPhase: checkpoint_state() for resilient %s, checkpoint_id %s\n".cstring(),
@@ -139,7 +140,8 @@ class _WaitingForCheckpointInitiationEventLogPhase is _EventLogPhase
     try
       let pending = _pending_checkpoint_states.insert_if_absent(checkpoint_id,
         Array[_QueuedCheckpointState])?
-      pending.push(_QueuedCheckpointState(resilient_id, payload))
+      pending.push(_QueuedCheckpointState(resilient_id, payload,
+        is_last_entry))
     else
       Fail()
     end
@@ -182,7 +184,8 @@ class _CheckpointEventLogPhase is _EventLogPhase
     check_completion()
 
   fun ref checkpoint_state(resilient_id: RoutingId,
-    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val)
+    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val,
+    is_last_entry: Bool)
   =>
     ifdef "checkpoint_trace" then
       @printf[I32]("_CheckpointEventLogPhase: checkpoint_state() for resilient %s, checkpoint_id %s\n".cstring(),
@@ -198,9 +201,13 @@ class _CheckpointEventLogPhase is _EventLogPhase
         _checkpoint_id.string().cstring())
     end
 
-    _event_log._checkpoint_state(resilient_id, checkpoint_id, payload)
+    _event_log._checkpoint_state(resilient_id, checkpoint_id, payload,
+      is_last_entry)
 
   fun ref state_checkpointed(resilient_id: RoutingId) =>
+    ifdef debug then
+      Invariant(not _checkpointed_resilients.contains(resilient_id))
+    end
     _checkpointed_resilients.set(resilient_id)
     check_completion()
 
@@ -261,7 +268,8 @@ class _RecoveringEventLogPhase is _EventLogPhase
       .cstring(), checkpoint_id.string().cstring())
 
   fun ref checkpoint_state(resilient_id: RoutingId,
-    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val)
+    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val,
+    is_last_entry: Bool)
   =>
     @printf[I32](("EventLog: Recovering so ignoring checkpoint state for " +
       "resilient %s\n").cstring(), resilient_id.string().cstring())
@@ -324,7 +332,8 @@ class _DisposedEventLogPhase is _EventLogPhase
     None
 
   fun ref checkpoint_state(resilient_id: RoutingId,
-    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val)
+    checkpoint_id: CheckpointId, payload: Array[ByteSeq] val,
+    is_last_entry: Bool)
   =>
     None
 
@@ -362,7 +371,11 @@ class _DisposedEventLogPhase is _EventLogPhase
 class _QueuedCheckpointState
   let resilient_id: RoutingId
   let payload: Array[ByteSeq] val
+  let is_last_entry: Bool
 
-  new create(resilient_id': RoutingId, payload': Array[ByteSeq] val) =>
+  new create(resilient_id': RoutingId, payload': Array[ByteSeq] val,
+    is_last_entry': Bool)
+  =>
     resilient_id = resilient_id'
     payload = payload'
+    is_last_entry = is_last_entry'

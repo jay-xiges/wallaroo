@@ -39,7 +39,7 @@ trait SinkMessageProcessor
     Fail()
 
   fun ref receive_barrier(step_id: RoutingId, producer: Producer,
-    barrier_token: BarrierToken)
+    barrier_token: BarrierToken, ack_barrier_if_complete: Bool = true)
   =>
     Fail()
 
@@ -81,7 +81,9 @@ type _Queued is (QueuedMessage | QueuedBarrier)
 class BarrierSinkMessageProcessor is SinkMessageProcessor
   let sink: Sink ref
   let _barrier_acker: BarrierSinkAcker
+  var _barrier_token: BarrierToken = InitialBarrierToken
   let _queued: Array[_Queued] = _queued.create()
+  var _force_queue: Bool = false
 
   new create(s: Sink ref, barrier_acker: BarrierSinkAcker) =>
     sink = s
@@ -93,33 +95,40 @@ class BarrierSinkMessageProcessor is SinkMessageProcessor
     msg_uid: MsgId, frac_ids: FractionalMessageId, i_seq_id: SeqId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
-    if _barrier_acker.input_blocking(i_producer_id) then
+    if _force_queue or _barrier_acker.input_blocking(i_producer_id) then
       let msg = TypedQueuedMessage[D](metric_name, pipeline_time_spent,
         data, key, event_ts, watermark_ts, i_producer_id, i_producer, msg_uid,
         frac_ids, i_seq_id, latest_ts, metrics_id, worker_ingress_ts)
+      @printf[I32]("2PC: DBGDBG: BarrierSinkMessageProcessor _queued.push\n".cstring())
       _queued.push(msg)
     else
+      @printf[I32]("2PC: DBGDBG: BarrierSinkMessageProcessor process_message\n".cstring())
       sink.process_message[D](metric_name, pipeline_time_spent, data, key,
         event_ts, watermark_ts, i_producer_id, i_producer, msg_uid, frac_ids,
         i_seq_id, latest_ts, metrics_id, worker_ingress_ts)
     end
 
   fun barrier_in_progress(): Bool =>
-    true
+    _barrier_token != InitialBarrierToken
 
   fun ref receive_new_barrier(input_id: RoutingId, producer: Producer,
     barrier_token: BarrierToken)
   =>
+    _barrier_token = barrier_token
     _barrier_acker.receive_new_barrier(input_id, producer, barrier_token)
 
   fun ref receive_barrier(input_id: RoutingId, producer: Producer,
-    barrier_token: BarrierToken)
+    barrier_token: BarrierToken, ack_barrier_if_complete: Bool = true)
   =>
     if _barrier_acker.input_blocking(input_id) then
       _queued.push(QueuedBarrier(input_id, producer, barrier_token))
     else
-      _barrier_acker.receive_barrier(input_id, producer, barrier_token)
+      _barrier_acker.receive_barrier(input_id, producer, barrier_token,
+        ack_barrier_if_complete)
     end
+
+  fun ref set_force_queue() =>
+    _force_queue = true
 
   fun ref queued(): Array[_Queued] =>
     let qd = Array[_Queued]

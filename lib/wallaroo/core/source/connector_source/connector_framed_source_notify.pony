@@ -121,6 +121,7 @@ class NotifyResultFulfill[In: Any val] is
     session_id = session_id'
 
   fun apply(t: NotifyResult[In]) =>
+    @printf[I32]("STREAM:SLF NotifyResultFulfill apply %s @ %d/%s\n".cstring(), t.success.string().cstring(), t.stream.id, t.stream.name.cstring())
     t.source.stream_notify_result(session_id, t.success, t.stream)
 
 class val ConnectorSourceNotifyParameters[In: Any val]
@@ -359,6 +360,7 @@ class ConnectorSourceNotify[In: Any val]
         then
           // This notifier is already handling this stream
           // So reject directly
+          @printf[I32]("%s ::: send_notify_ack @ line %d\n".cstring(), WallClock.seconds().string().cstring(), __loc.line())
           send_notify_ack(false, m.stream_id, m.point_of_ref)
         else
           _process_notify(where source=source, stream_id=m.stream_id,
@@ -703,7 +705,9 @@ class ConnectorSourceNotify[In: Any val]
   fun create_checkpoint_state(): Array[ByteSeq val] val =>
     let w: Writer = w.create()
     for s_map in [_active_streams ; _pending_close].values() do
+      @printf[I32]("STREAM:TMP create_checkpoint_state\n".cstring())
       for stream_state in s_map.values() do
+        @printf[I32]("STREAM:TMP create_checkpoint_state moo\n".cstring())
         stream_state.serialize(w)
       end
     end
@@ -733,6 +737,7 @@ class ConnectorSourceNotify[In: Any val]
         _pending_relinquish.push(StreamTuple(s.id, s.name, s.last_acked))
       end
     end
+    @printf[I32]("STREAM:SLF call _relinquish_streams() line %d\n".cstring(), __loc.line())
     _relinquish_streams()
     rollback_complete(checkpoint_id)
 
@@ -774,6 +779,7 @@ class ConnectorSourceNotify[In: Any val]
       // process acks for EOS/_pending_close streams
       _process_acks_for_pending_close()
       // process any stream relinquish requests
+      @printf[I32]("STREAM:SLF call _relinquish_streams() line %d\n".cstring(), __loc.line())
       _relinquish_streams()
     end
 
@@ -807,6 +813,7 @@ class ConnectorSourceNotify[In: Any val]
     end
 
   fun ref _relinquish_streams() =>
+    @printf[I32]("STREAM:SLF _relinquish_streams() top, _pending_relinquish.size = %d\n".cstring(), _pending_relinquish.size())
     let streams = recover iso Array[StreamTuple] end
     for s in _pending_relinquish.values() do
       streams.push(s)
@@ -814,6 +821,8 @@ class ConnectorSourceNotify[In: Any val]
     _pending_relinquish.clear()
 
     if streams.size() > 0 then
+      @printf[I32]("STREAM:SLF ConnectorSource relinquishing %s streams\n".cstring(),
+        streams.size().string().cstring())
       @printf[I32]("ConnectorSource relinquishing %s streams\n".cstring(),
         streams.size().string().cstring())
       _listener.streams_relinquish(source_id, consume streams)
@@ -851,6 +860,7 @@ class ConnectorSourceNotify[In: Any val]
     _pending_notify.set(stream_id)
 
     // create a promise for handling result
+    @printf[I32]("STREAM:SLF ConnectorSource _process_notify %d/%s streams\n".cstring(), stream_id, stream_name.cstring())
     let promise = Promise[NotifyResult[In]]
     promise.next[None](recover NotifyResultFulfill[In](stream_id, _session_id) end)
 
@@ -880,6 +890,8 @@ class ConnectorSourceNotify[In: Any val]
       _active_streams(stream.id) = s
     end
     // send response either way
+    @printf[I32]("STREAM:SLF %s ::: send_notify_ack @ line %d\n".cstring(), WallClock.seconds().string().cstring(), __loc.line())
+    @printf[I32]("%s ::: send_notify_ack @ line %d\n".cstring(), WallClock.seconds().string().cstring(), __loc.line())
     send_notify_ack(success, stream.id, stream.last_acked)
 
   fun ref send_notify_ack(success: Bool, stream_id: StreamId,
@@ -927,6 +939,8 @@ class ConnectorSourceNotify[In: Any val]
 
   fun ref send_restart() =>
     ifdef "trace" then
+      @printf[I32](("%s ::: _send_restart top\n").cstring(),
+        WallClock.seconds().string().cstring())
       @printf[I32]("TRACE: %s.%s()\n".cstring(),
         __loc.type_name().cstring(), __loc.method_name().cstring())
     end

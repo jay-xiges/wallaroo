@@ -61,11 +61,14 @@ actor CheckpointInitiator is Initializable
   let _auth: AmbientAuth
   let _worker_name: WorkerName
   var _primary_worker: WorkerName
+  var _is_active: Bool
   var _time_between_checkpoints: U64
   let _event_log: EventLog
-  let _barrier_initiator: BarrierInitiator
-
+  let _barrier_coordinator: BarrierCoordinator
   var _recovery: (Recovery | None) = None
+
+  let _source_listeners: SetIs[SourceListener] = _source_listeners.create()
+  let _sinks: SetIs[Sink] = _sinks.create()
 
   // Used as a way to identify outdated timer-based initiate_checkpoint calls
   var _checkpoint_group: USize = 0
@@ -89,16 +92,17 @@ actor CheckpointInitiator is Initializable
   new create(auth: AmbientAuth, worker_name: WorkerName,
     primary_worker: WorkerName, connections: Connections,
     time_between_checkpoints: U64, event_log: EventLog,
-    barrier_initiator: BarrierInitiator, checkpoint_ids_file: String,
+    barrier_coordinator: BarrierCoordinator, checkpoint_ids_file: String,
     the_journal: SimpleJournal, do_local_file_io: Bool,
     is_active: Bool = true, is_recovering: Bool = false)
   =>
     _auth = auth
     _worker_name = worker_name
     _primary_worker = primary_worker
+    _is_active = is_active
     _time_between_checkpoints = time_between_checkpoints
     _event_log = event_log
-    _barrier_initiator = barrier_initiator
+    _barrier_coordinator = barrier_coordinator
     _connections = connections
     _checkpoint_id_file = checkpoint_ids_file
     _the_journal = the_journal
@@ -141,9 +145,6 @@ actor CheckpointInitiator is Initializable
       end
     end
 
-  be set_recovery(r: Recovery) =>
-    _recovery = r
-
   be application_begin_reporting(initializer: LocalTopologyInitializer) =>
     initializer.report_created(this)
 
@@ -172,6 +173,9 @@ actor CheckpointInitiator is Initializable
       time_until_checkpoint)
     _timers(consume t)
 
+  be set_recovery(r: Recovery) =>
+    _recovery = r
+
   fun workers(): StringSet box => _workers
 
   be add_worker(w: String) =>
@@ -187,6 +191,18 @@ actor CheckpointInitiator is Initializable
         w.cstring())
     end
     _workers.unset(w)
+
+  be register_sink(sink: Sink) =>
+    _sinks.set(sink)
+
+  be unregister_sink(sink: Sink) =>
+    _sinks.unset(sink)
+
+  be register_source_listener(source_listener: SourceListener) =>
+    _source_listeners.set(source_listener)
+
+  be unregister_source_listener(source_listener: SourceListener) =>
+    _source_listeners.unset(source_listener)
 
   be lookup_next_checkpoint_id(p: Promise[CheckpointId]) =>
     p(_last_complete_checkpoint_id + 1)
@@ -207,7 +223,9 @@ actor CheckpointInitiator is Initializable
     _clear_pending_checkpoints()
     _phase.initiate_checkpoint(_checkpoint_group, this)
 
-  fun ref _initiate_checkpoint(checkpoint_group: USize) =>
+  fun ref _initiate_checkpoint(checkpoint_group: USize,
+    repeating: Bool = true)
+  =>
     ifdef "resilience" then
       _clear_pending_checkpoints()
       _current_checkpoint_id = _current_checkpoint_id + 1
@@ -238,10 +256,11 @@ actor CheckpointInitiator is Initializable
 
       let barrier_promise = Promise[BarrierToken]
       barrier_promise.next[None](
-        recover this~checkpoint_barrier_complete() end)
-      _barrier_initiator.inject_barrier(token, barrier_promise)
+        recover this~checkpoint_barrier_complete() end,
+        recover this~abort_checkpoint(_current_checkpoint_id) end)
+      _barrier_coordinator.inject_barrier(token, barrier_promise)
 
-      _phase = _CheckpointingPhase(token, this)
+      _phase = _CheckpointingPhase(token, repeating, this)
     end
 
   be resume_checkpointing_from_rollback() =>
@@ -255,7 +274,7 @@ actor CheckpointInitiator is Initializable
         let promise = Promise[BarrierToken]
         promise.next[None]({(t: BarrierToken) =>
           _self.initiate_checkpoint(_checkpoint_group)})
-        _barrier_initiator.inject_barrier(
+        _barrier_coordinator.inject_barrier(
           CheckpointRollbackResumeBarrierToken(_last_rollback_id,
             _last_complete_checkpoint_id), promise)
         _phase.resume_checkpointing_from_rollback()
@@ -284,6 +303,42 @@ actor CheckpointInitiator is Initializable
         .cstring(), token.string().cstring())
     end
     _phase.checkpoint_barrier_complete(token)
+
+  be abort_checkpoint(checkpoint_id: CheckpointId) =>
+    """
+    If a sink fails to successfully precommit its outputs, or runs into some
+    other irreversible problem, then it will abort the checkpoint barrier.
+    At this point, we must roll back to the last successful checkpoint.
+    """
+    if _primary_worker == _worker_name then
+      @printf[I32]("CheckpointInitiator: Aborting Checkpoint %s\n".cstring(),
+        checkpoint_id.string().cstring())
+      match _recovery
+      | let r: Recovery =>
+        let ws: Array[WorkerName] iso = recover Array[WorkerName] end
+        for w in _workers.values() do
+          ws.push(w)
+        end
+        if checkpoint_id <= 1 then
+          Fail()
+        else
+          // TODO: This isn't right, what if we have two aborted checkpoints
+          // in a row?
+          r.update_checkpoint_id(checkpoint_id - 1)
+        end
+        r.start_recovery(consume ws where with_reconnect = false)
+      else
+        Fail()
+      end
+    else
+      try
+        let msg = ChannelMsgEncoder.abort_checkpoint(checkpoint_id,
+          _worker_name, _auth)?
+        _connections.send_control(_primary_worker, msg)
+      else
+        Fail()
+      end
+    end
 
   be event_log_checkpoint_complete(worker: WorkerName,
     checkpoint_id: CheckpointId)
@@ -323,7 +378,7 @@ actor CheckpointInitiator is Initializable
   // fun ref event_log_write_checkpoint_id(checkpoint_id: CheckpointId,
   //   token: CheckpointBarrierToken, repeating: Bool)
   fun ref event_log_write_checkpoint_id(checkpoint_id: CheckpointId,
-    token: CheckpointBarrierToken)
+    token: CheckpointBarrierToken, repeating: Bool)
   =>
     ifdef "checkpoint_trace" then
       @printf[I32]("CheckpointInitiator: event_log_write_checkpoint_id()\n"
@@ -348,9 +403,9 @@ actor CheckpointInitiator is Initializable
       end
     end
 
-    _phase = _WaitingForEventLogIdWrittenPhase(token, this)
+    _phase = _WaitingForEventLogIdWrittenPhase(token, repeating, this)
 
-  fun ref checkpoint_complete(token: BarrierToken) =>
+  fun ref checkpoint_complete(token: BarrierToken, repeating: Bool) =>
     """
     This is called once all workers in the cluster have committed the
     checkpoitn id for this token.
@@ -370,6 +425,19 @@ actor CheckpointInitiator is Initializable
           let msg = ChannelMsgEncoder.commit_checkpoint_id(st.id,
             _last_rollback_id, _worker_name, _auth)?
           _connections.send_control_to_cluster(msg)
+          _propagate_checkpoint_complete(st.id)
+
+          // Prepare for next checkpoint
+          if repeating and _is_active and (_worker_name == _primary_worker)
+          then
+            ifdef "checkpoint_trace" then
+              @printf[I32]("Creating _InitiateCheckpoint timer for future checkpoint %s\n".cstring(),
+                (_current_checkpoint_id + 1).string().cstring())
+            end
+            let t = Timer(_InitiateCheckpoint(this, _checkpoint_group),
+              _time_between_checkpoints)
+            _timers(consume t)
+          end
         else
           Fail()
         end
@@ -388,6 +456,14 @@ actor CheckpointInitiator is Initializable
       end
     else
       Fail()
+    end
+
+  fun _propagate_checkpoint_complete(checkpoint_id: CheckpointId) =>
+    for sl in _source_listeners.values() do
+      sl.checkpoint_complete(checkpoint_id)
+    end
+    for s in _sinks.values() do
+      s.checkpoint_complete(checkpoint_id)
     end
 
   be prepare_for_rollback() =>
@@ -440,7 +516,7 @@ actor CheckpointInitiator is Initializable
         })
         let resume_token = CheckpointRollbackResumeBarrierToken(rollback_id,
           _last_complete_checkpoint_id)
-        _barrier_initiator.inject_blocking_barrier(token, barrier_promise,
+        _barrier_coordinator.inject_blocking_barrier(token, barrier_promise,
           resume_token)
       else
         try
@@ -464,6 +540,7 @@ actor CheckpointInitiator is Initializable
   =>
     if sender == _primary_worker then
       _commit_checkpoint_id(checkpoint_id, rollback_id)
+      _propagate_checkpoint_complete(checkpoint_id)
     else
       @printf[I32](("CommitCheckpointIdMsg received from worker that is " +
         "not the primary for checkpoints. Ignoring.\n").cstring())

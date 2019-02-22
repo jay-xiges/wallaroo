@@ -259,6 +259,7 @@ class MultiSourceConnector(AtLeastOnceSourceConnector, BaseIter):
 
     # Make this class an iterable:
     def __next__(self):
+        time.sleep(0.02)
         if len(self.keys) > 0:
             # get next position
             self._idx = (self._idx + 1) % len(self.keys)
@@ -266,6 +267,7 @@ class MultiSourceConnector(AtLeastOnceSourceConnector, BaseIter):
             key = self.keys[self._idx]
             # if stream is not in an open state, return nothing.
             if not key in self.open:
+                logging.error("__next__ A")
                 return None
             try:
                 # get source at key
@@ -285,20 +287,24 @@ class MultiSourceConnector(AtLeastOnceSourceConnector, BaseIter):
                 source, _ = self.sources.get(key, (None, None))
                 if source:
                     self.remove_source(source)
+                logging.error("__next__ B")
                 return None
             except IndexError:
                 # Index might have overflowed due to manual remove_source
                 # will be corrected in the next iteration
+                logging.error("__next__ C")
                 return None
         elif not self._added_source:
             # In very fast select loops, we might reach the end condition
             # before we have a chance to add our first source, so keep
             # spinning
+            logging.error("__next__ D")
             return None
         elif not self.closed:
             # There's a race when added_source can be set, but keys isn't
             # populated yet. If closed is empty, we haven't yet closed any
             # sources, so shouldn't terminate the loop
+            logging.error("__next__ E")
             return None
         else:
             logging.debug("__next__: raising StopIteration")

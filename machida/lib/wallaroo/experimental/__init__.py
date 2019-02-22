@@ -61,6 +61,17 @@ def stream_message_encoder(func):
     C = wallaroo._wallaroo_wrap(func.__name__, func, wallaroo.ConnectorEncoder)
     return C()
 
+def octet_message_decoder(func):
+    wallaroo._validate_arity_compatability(func.__name__, func, 1)
+    C = wallaroo._wallaroo_wrap(func.__name__, func, wallaroo.OctetDecoder)
+    return C()
+
+
+def octet_message_encoder(func):
+    wallaroo._validate_arity_compatability(func.__name__, func, 1)
+    C = wallaroo._wallaroo_wrap(func.__name__, func, wallaroo.OctetEncoder)
+    return C()
+
 
 class SourceConnectorConfig(object):
     def __init__(self, name, encoder, decoder, port, cookie,
@@ -73,7 +84,7 @@ class SourceConnectorConfig(object):
         self._max_credits = max_credits
         self._refill_credits = refill_credits
         self._host = host
-        logging.debug("{}: name {} encoder {} decoder {} max_credits {}"
+        logging.error("{}: name {} encoder {} decoder {} max_credits {}"
             .format(self,name, encoder, decoder, max_credits))
 
     def to_tuple(self):
@@ -81,15 +92,16 @@ class SourceConnectorConfig(object):
 
 
 class SinkConnectorConfig(object):
-    def __init__(self, name, encoder, decoder, port, host='127.0.0.1'):
+    def __init__(self, name, encoder, decoder, port, cookie, host='127.0.0.1'):
         self._name = name
         self._host = host
         self._port = port
+        self._cookie = cookie
         self._encoder = encoder
         self._decoder = decoder
 
     def to_tuple(self):
-        return ("sink_connector", self._name, self._host, str(self._port), self._encoder, self._decoder)
+        return ("sink_connector", self._name, self._host, str(self._port), self._encoder, self._decoder, self._cookie)
 
 
 class BaseConnector(object):
@@ -152,6 +164,7 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
         self._host = host
         self._port = int(port)  # convert port to int
         self.credits = 0
+        logging.error("DBGDBG: PY credits {}".format(self.credits))
         self.version = version
         self.cookie = cookie
         self.program_name = program_name
@@ -286,6 +299,7 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
         else:
             # deposit the credits
             self.credits += msg.initial_credits
+            logging.error("DBGDBG: PY credits {}".format(self.credits))
             # set handshake_complete
             self.handshake_complete = True
             # set terminator to 4 to expect the next message's header
@@ -293,9 +307,14 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
 
     def _handle_notify_ack(self, msg):
         old = self._streams.get(msg.stream_id, None)
+        if not msg.notify_success:
+            logging.warning("TODO do something to try again, failed notify: {}".format(msg))
+            sys.exit(66)
         if old is not None:
             new = Stream(old.id, old.name, msg.point_of_ref,
                          msg.notify_success)
+            logging.error("DBGDBG: _handle_notify_ack msg {}".format(msg))
+            logging.error("DBGDBG: _handle_notify_ack new Stream {}".format(new))
             self._streams[old.id] = new
             self.stream_added(new)
             if new.is_open:
@@ -308,6 +327,7 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
 
     def _handle_ack(self, msg):
         self.credits += msg.credits
+        logging.error("DBGDBG: PY credits {}".format(self.credits))
         for (stream_id, point_of_ref) in msg.acks:
             # Try to get old stream data
             old = self._streams.get(stream_id, None)
@@ -315,6 +335,7 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
                 if point_of_ref != old.point_of_ref:
                     new = Stream(stream_id, old.name, point_of_ref,
                                  old.is_open)
+                    logging.error("DBGDBG: _handle_ack new Stream {}".format(new))
                     self._streams[stream_id] = new
                 else:
                     new = old
@@ -380,16 +401,22 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
                 # continue
             try:
                 while self.credits > 0:
+                    logging.error("DBGDBG: PY handle_write credits {}".format(self.credits))
                     msg = self.__next__()
+                    logging.error("DBGDBG: PY handle_write msg0 {}".format(msg))
                     if msg:
+                        logging.error("DBGDBG: PY handle_write msg {}".format(msg))
                         self.write(msg)
                     else:
                         break
+                logging.error("DBGDBG: PY handle_write initiate_send")
                 self.initiate_send()
             except StopIteration:
+                logging.error("DBGDBG: PY StopIteration handle_write credits {}".format(self.credits))
                 self.initiate_send()
                 self.shutdown()
         else:
+            logging.error("DBGDBG: PY ELSE handle_write credits {}".format(self.credits))
             self.initiate_send()
 
     def shutdown(self, error=None):
@@ -436,6 +463,7 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
                     self._write(data)
                     # use up 1 credit
                     self.credits -= 1
+                    logging.error("DBGDBG: PY credits {}".format(self.credits))
                 else:
                     raise
             except:
@@ -449,6 +477,7 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
             self._write(data)
             # use up 1 credit
             self.credits -= 1
+            logging.error("DBGDBG: PY credits {}".format(self.credits))
         elif isinstance(msg, cwm.Error):
             # write the message
             data = cwm.Frame.encode(msg)
@@ -489,6 +518,7 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
                          (point_of_ref if point_of_ref is not None else
                           old.point_of_ref),
                          old.is_open)
+            logging.error("DBGDBG: notify new Stream {}".format(new))
         else:
             if stream_name is None:
                 raise ConnectorError("Cannot notify a new stream without "
@@ -497,6 +527,7 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
                          stream_name,
                          0 if point_of_ref is None else point_of_ref,
                          False)
+            logging.error("DBGDBG: notify 2 new Stream {}".format(new))
 
         # update locally and call stream_added
         self._streams[new.id] = new
@@ -580,12 +611,14 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
             "reinitiating handshake.")
         # reset credits
         self.credits = 0
+        logging.error("DBGDBG: PY credits {}".format(self.credits))
         # close connection
         self._conn.close()
         # close streams
         for sid, stream in self._streams.items():
             if stream.is_open:
                 new = Stream(stream.id, stream.name, stream.point_of_ref, False)
+                logging.error("DBGDBG: _handle_restart new Stream {}".format(new))
                 self._streams[sid] = new
                 self.stream_closed(new)
         # optionally update target host and port
@@ -597,6 +630,10 @@ class AtLeastOnceSourceConnector(asynchat.async_chat, BaseConnector, BaseMeta):
             self._host = host
             self._port = port
         # try to connect again
+        print("DBGDBG: handle_restart, time = {}".format(time.time()))
+        time.sleep(1.5) ## TODO work-around for NotifyAck.notify_success=False)
+        #time.sleep(2.345) ## TODO work-around for NotifyAck.notify_success=False)
+        print("DBGDBG: handle_restart, time = {}".format(time.time()))
         self.connect()
         self.handle_restarted(self._streams)
 
@@ -677,11 +714,12 @@ class SinkConnector(object):
                     sink = step[1]
         if sink is None:
             raise RuntimeError("Unable to find a sink connector with the name " + params.connector_name)
-        (_, _name, host, port, _encoder, decoder) = sink
+        (_, _name, host, port, _encoder, decoder, cookie) = sink
         self.params = params
         self._decoder = decoder
         self._host = host
         self._port = port
+        self._cookie = cookie
         self._acceptor = None
         self._connections = []
         self._buffers = {}

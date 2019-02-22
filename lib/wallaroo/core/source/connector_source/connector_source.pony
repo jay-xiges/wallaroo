@@ -33,20 +33,19 @@ use "collections"
 use "net"
 use "promises"
 use "time"
+use "wallaroo/core/barrier"
 use "wallaroo/core/boundary"
+use "wallaroo/core/checkpoint"
 use "wallaroo/core/common"
+use "wallaroo/core/data_receiver"
 use "wallaroo/core/initialization"
 use "wallaroo/core/invariant"
 use "wallaroo/core/metrics"
+use "wallaroo/core/recovery"
+use "wallaroo/core/router_registry"
 use "wallaroo/core/routing"
 use "wallaroo/core/source"
 use "wallaroo/core/topology"
-use "wallaroo/core/barrier"
-use "wallaroo/core/data_receiver"
-use "wallaroo/core/recovery"
-use "wallaroo/core/router_registry"
-use "wallaroo/core/checkpoint"
-use cwm = "wallaroo_labs/connector_wire_messages"
 use "wallaroo_labs/mort"
 
 use @pony_asio_event_create[AsioEventID](owner: AsioEventNotify, fd: U32,
@@ -623,29 +622,22 @@ actor ConnectorSource[In: Any val] is Source
       end
     end
 
-  be barrier_complete(token: BarrierToken) =>
+  be checkpoint_complete(checkpoint_id: CheckpointId) =>
     ifdef "checkpoint_trace" then
-      @printf[I32]("barrier_complete at ConnectorSource %s\n".cstring(),
-        _source_id.string().cstring())
+      @printf[I32]("Checkpoint %s complete at ConnectorSource %s\n".cstring(),
+        checkpoint_id.string().cstring(), _source_id.string().cstring())
     end
-    match token
-    | let sbt: CheckpointBarrierToken =>
-      _notify.barrier_complete(sbt.id)
-    else
-      @printf[I32]("DEBUG %s.%s when %s\n".cstring(),
-        __loc.type_name().cstring(), __loc.method_name().cstring(),
-        token.string().cstring())
-      // TODO [post-source-migration]: this shouldn't actually fail, there are many
-      // barrier token types for which it's safe to do nothing.
-      // Bug john for documentation on this.
-      // TODO [post-source-migration]: Check with John on whether this is okay
-      None
-    end
+    _notify.barrier_complete(checkpoint_id)
 
   //////////////
   // CHECKPOINTS
   //////////////
   fun ref checkpoint_state(checkpoint_id: CheckpointId) =>
+    @printf[I32]("STREAM:TMP Checkpoint state for checkpoint_id %s at ConnectorSource %s\n".cstring(), checkpoint_id.string().cstring(), _source_id.string().cstring())
+    ifdef "checkpoint_trace" then
+      @printf[I32]("Checkpoint state for checkpoint_id %s at ConnectorSource %s\n".cstring(),
+        checkpoint_id.string().cstring(), _source_id.string().cstring())
+    end
     _next_checkpoint_id = checkpoint_id + 1
     let state = _notify.create_checkpoint_state()
     _event_log.checkpoint_state(_source_id, checkpoint_id, state)
@@ -923,6 +915,7 @@ actor ConnectorSource[In: Any val] is Source
           _event,
           _read_buf.cpointer(_read_buf_offset),
           _read_buf.size() - _read_buf_offset) ?
+        @printf[I32]("DBGDBG: ConnectorSource @pony_os_recv -> %d bytes\n".cstring(), len)
 
         match len
         | 0 =>

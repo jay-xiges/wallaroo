@@ -18,7 +18,6 @@ Celsius value and sends out a floating point Fahrenheit value.
 """
 
 import struct
-
 import wallaroo
 import wallaroo.experimental
 
@@ -36,17 +35,17 @@ def application_setup(args):
         cookie="Dragons Love Tacos!",
         max_credits=10,
         refill_credits=8)
-    #sink_config = wallaroo.experimental.SinkConnectorConfig(
-    #    "fahrenheit_conversion",
-    #    encoder=encode_conversion,
-    #    decoder=decode_conversion,
-    #    port=7200)
-    sink_config = wallaroo.TCPSinkConfig(out_host, out_port, encode_conversion)
+    fahrenheit_conversion = wallaroo.experimental.SinkConnectorConfig(
+        "fahrenheit_conversion",
+        encoder=encode_conversion,
+        decoder=decode_conversion,
+        port=7200,
+        cookie="Dragons Love Tacos!")
     pipeline = (
         wallaroo.source("convert temperature readings", source_config)
         .to(multiply)
         .to(add)
-        .to_sink(sink_config)
+        .to_sink(fahrenheit_conversion)
     )
     return wallaroo.build_application("Celsius to Fahrenheit", pipeline)
 
@@ -75,9 +74,12 @@ def decoder(data):
     print("nh: {!r}".format(data))
     return struct.unpack(">f", data)[0]
 
-@wallaroo.experimental.stream_message_encoder
+@wallaroo.experimental.octet_message_encoder
 def encode_conversion(data):
-    return "{}\n".format(data).encode('utf-8')
+    # Let's make line-oriented output
+    x = (str(data) + '\n').encode('utf-8')
+    # print('DBG: sink encode: {}'.format(x))
+    return x
 
 
 @wallaroo.experimental.stream_message_decoder
