@@ -437,7 +437,7 @@ primitive ChannelMsgEncoder
   fun abort_checkpoint(checkpoint_id: CheckpointId, sender: WorkerName,
     auth: AmbientAuth): Array[ByteSeq] val ?
   =>
-    _encode(AbortCheckpointMsg(checkpoint_id, sender), auth)
+    _encode(AbortCheckpointMsg(checkpoint_id, sender), auth)?
 
   fun event_log_initiate_checkpoint(checkpoint_id: CheckpointId,
     sender: WorkerName, auth: AmbientAuth): Array[ByteSeq] val ?
