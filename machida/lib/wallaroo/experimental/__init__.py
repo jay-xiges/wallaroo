@@ -50,10 +50,11 @@ class SourceConnectorConfig(object):
 
 
 class SinkConnectorConfig(object):
-    def __init__(self, name, encoder, decoder, port, host='127.0.0.1'):
+    def __init__(self, name, encoder, decoder, port, cookie, host='127.0.0.1'):
         self._name = name
         self._host = host
         self._port = port
+        self._cookie = cookie
         self._encoder = encoder
         self._decoder = decoder
 
@@ -113,11 +114,12 @@ class SinkConnector(object):
                     sink = step[1]
         if sink is None:
             raise RuntimeError("Unable to find a sink connector with the name " + params.connector_name)
-        (_, _name, host, port, _encoder, decoder) = sink
+        (_, _name, host, port, _encoder, decoder, cookie) = sink
         self.params = params
         self._decoder = decoder
         self._host = host
         self._port = port
+        self._cookie = cookie
         self._acceptor = None
         self._connections = []
         self._buffers = {}

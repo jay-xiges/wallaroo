@@ -33,7 +33,8 @@ def application_setup(args):
         "fahrenheit_conversion",
         encoder=encode_conversion,
         decoder=decode_conversion,
-        port=7200)
+        port=7200,
+        cookie="Dragons Love Tacos!")
     pipeline = (
         wallaroo.source("convert temperature readings", celsius_feed)
         .to(multiply)

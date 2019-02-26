@@ -39,8 +39,8 @@ use "wallaroo/core/data_receiver"
 use "wallaroo/core/network"
 use "wallaroo/core/recovery"
 use "wallaroo/core/checkpoint"
+use cp = "wallaroo_labs/connector_protocol"
 use "wallaroo_labs/mort"
-use "wallaroo_labs/time"
 use "wallaroo/core/initialization"
 use "wallaroo/core/invariant"
 use "wallaroo/core/messages"
@@ -103,7 +103,7 @@ actor ConnectorSink is Sink
   var _mute_outstanding: Bool = false
 
   // Connector
-  var _notify: WallarooOutgoingNetworkActorNotify
+  var _notify: ConnectorSinkNotify
   var _read_buf: Array[U8] iso
   var _next_size: USize
   let _max_size: USize
@@ -219,7 +219,7 @@ actor ConnectorSink is Sink
   =>
     var receive_ts: U64 = 0
     ifdef "detailed-metrics" then
-      receive_ts = WallClock.nanoseconds()
+      receive_ts = Time.nanos()
       _metrics_reporter.step_metric(metric_name, "Before receive at sink",
         9998, latest_ts, receive_ts)
     end
@@ -228,14 +228,64 @@ actor ConnectorSink is Sink
       @printf[I32]("Rcvd msg at ConnectorSink\n".cstring())
     end
     try
-      let encoded = _encoder.encode[D](data, _wb)?
+      // SLF TODO: Put credit check in make_message() or elsewhere?
+      if _notify.credits == 0 then
+        @printf[I32]("BUMMER: OUT OF CREDITS!\n".cstring())
+        // SLF TODO: queue and/or backpressure instead of halting here.
+        // Ideas?
+        // 1. We can't simply use _apply_backpressure because the socket
+        //    probably is writeable, which would mean ASIO would immediately
+        //    trigger a writeable event, and we'd have to check credits
+        //    and defer again, causing an ASIO busy wait loop??
+        //    Maybe that's OK?  But if the remote were to crash without
+        //    sending an Ack with credit replenishing, then we could
+        //    busy wait for a long time.
+        // 2. If we have zero credits, then we set
+        //    pony_asio_event_set_writeable(false), then we also apply
+        //    backpressure *without* also resubscribing
+        //    pony_asio_event_set_writeable(true)!  We want to mute
+        //    upstreams, and the rest of _apply_backpressure() will do
+        //    that for us.
+        //    * For events that arrive here while pony**writeable(false),
+        //      can we simply call _writev() and then know exactly how
+        //      many credits correspond to stuff in _pending??
+        //      * Do we change the 2-tuple in _pending to a 3-tuple, where
+        //        the 3rd element is the # of credits that correspond?
+        //        * Tricksy, because a single credit of message may be more
+        //          than one writev array item!
+        // SLF LEFT OFF HERE
+      else
+        _notify.credits = _notify.credits - 1
+      end
+      let encoded1 = _encoder.encode[D](data, _wb)?
+      try
+        @printf[I32]("Rcvd msg at ConnectorSink, 1 size = %d\n".cstring(), encoded1(0)?.size())
+        @printf[I32]("Rcvd msg at ConnectorSink, 1 = %s\n".cstring(), _print_array[U8](encoded1(0)?).cstring())
+      else
+        @printf[I32]("Rcvd msg at ConnectorSink, 1 fallback size = %d\n".cstring(), encoded1.size())
+      end
+      let encoded2 =
+        try
+          // SLF TODO: How the hell do we access sequence # & stuff??
+          let msg = _notify.make_message(encoded1)?
+          let w1: Writer = w1.create()  
+          let w2: Writer = w2.create()
+          let b = cp.Frame.encode(msg, w1)
+          w2.u32_be(b.size().u32())
+          @printf[I32]("Rcvd msg at ConnectorSink, 2 size = %d + header 4\n".cstring(), b.size())
+          w2.write(b)
+          w2.done()
+        else
+          Fail()
+          encoded1
+        end
 
       let next_seq_id = (_seq_id = _seq_id + 1)
-      _writev(encoded, next_seq_id)
+      _writev(encoded2, next_seq_id)
 
       // TODO: Should happen when tracking info comes back from writev as
       // being done.
-      let end_ts = WallClock.nanoseconds()
+      let end_ts = Time.nanos()
       let time_spent = end_ts - worker_ingress_ts
 
       ifdef "detailed-metrics" then
@@ -377,6 +427,7 @@ actor ConnectorSink is Sink
     end
 
   be barrier_fully_acked(token: BarrierToken) =>
+    // SLF TODO
     None
 
   fun ref _clear_barriers() =>
@@ -442,6 +493,7 @@ actor ConnectorSink is Sink
               Fail()
             end
 
+            @printf[I32]("QQQ: _notify.connected @ line %d\n".cstring(), __loc.line())
             _notify.connected(this)
             _pending_reads()
 
@@ -480,6 +532,7 @@ actor ConnectorSink is Sink
             _shutdown = false
             _shutdown_peer = false
 
+            @printf[I32]("QQQ: _notify.connected @ line %d\n".cstring(), __loc.line())
             _notify.connected(this)
             _pending_reads()
 
@@ -774,6 +827,7 @@ actor ConnectorSink is Sink
         // Write as much data as possible.
         var len = @pony_os_writev[USize](_event,
           _pending_writev.cpointer(), num_to_send) ?
+        @printf[I32]("QQQ ConnectorSink: pony_os_writev wrote %d\n".cstring(), len)
 
         // keep track of how many bytes we sent
         bytes_sent = bytes_sent + len
@@ -981,39 +1035,12 @@ actor ConnectorSink is Sink
     """
     None
 
-class ConnectorSinkNotify is WallarooOutgoingNetworkActorNotify
-  fun ref connecting(conn: WallarooOutgoingNetworkActor ref, count: U32) =>
-    None
-
-  fun ref connected(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32]("ConnectorSink connected\n".cstring())
-
-
-  fun ref closed(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32]("ConnectorSink connection closed\n".cstring())
-
-  fun ref connect_failed(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32]("ConnectorSink connection failed\n".cstring())
-
-  fun ref sentv(conn: WallarooOutgoingNetworkActor ref,
-    data: ByteSeqIter): ByteSeqIter
-  =>
-    data
-
-  fun ref received(conn: WallarooOutgoingNetworkActor ref, data: Array[U8] iso,
-    times: USize): Bool
-  =>
-    true
-
-  fun ref expect(conn: WallarooOutgoingNetworkActor ref, qty: USize): USize =>
-    qty
-
-  fun ref throttled(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32]("ConnectorSink is experiencing back pressure\n".cstring())
-
-  fun ref unthrottled(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32](("ConnectorSink is no longer experiencing" +
-      " back pressure\n").cstring())
+  fun _print_array[A: Stringable #read](array: ReadSeq[A]): String =>
+    """
+    Generate a printable string of the contents of the given readseq to use in
+    error messages.
+    """
+    "[len=" + array.size().string() + ": " + ", ".join(array.values()) + "]"
 
 class PauseBeforeReconnectConnectorSink is TimerNotify
   let _tcp_sink: ConnectorSink
@@ -1024,3 +1051,4 @@ class PauseBeforeReconnectConnectorSink is TimerNotify
   fun ref apply(timer: Timer, count: U64): Bool =>
     _tcp_sink.reconnect()
     false
+

@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+
+import asyncore
+import asynchat
+import random
+import socket
+import struct
+import sys
+import traceback
+
+from wallaroo.experimental import connector_wire_messages as cwm
+
+class AsyncServer(asynchat.async_chat, object):
+    def __init__(self, handler_id, sock, streams=None):
+        print("AsyncServer.__init__", handler_id, sock)
+        self._id = handler_id
+        self._conn = sock
+        asynchat.async_chat.__init__(self, sock=self._conn)
+        self.in_buffer = []
+        self.out_buffer = []
+        self.reading_header = True
+        self.set_terminator(4) # first frame header
+        self.in_handshake = True
+        self._streams = {} if streams is None else streams
+        self.received_count = 0
+        self._reset_count = {}
+
+    def collect_incoming_data(self, data):
+        """Buffer the data"""
+        self.in_buffer.append(data)
+
+    def found_terminator(self):
+        """Data is going to be in two parts:
+        1. a 32-bit unsigned integer length header
+        2. a payload of the size specified by (1)
+        """
+        if self.reading_header:
+            # Read the header and set the terminator size for the payload
+            self.reading_header = False
+            h = struct.unpack(">I", b"".join(self.in_buffer))[0]
+            self.in_buffer = []
+            self.set_terminator(h)
+            print('SLF: MOCK: got header, body size = {}'.format(h))
+        else:
+            # Read the payload and pass it to _handle_frame
+            frame_data = b"".join(self.in_buffer)
+            self.in_buffer = []
+            self.set_terminator(4) # read next frame header
+            self.reading_header = True
+            print('SLF: MOCK: got bytes = {}'.format(frame_data))
+            self._handle_frame(frame_data)
+
+    def _handle_frame(self, frame):
+        print('SLF: MOCK: _handle_frame {}'.format(frame))
+        self.received_count += 1
+        self.updated_received_count()
+        msg = cwm.Frame.decode(frame)
+        # Hello, Ok, Error, Notify, NotifyAck, Message, Ack, Restart
+        self.count = 0
+        if isinstance(msg, cwm.Hello):
+            print('SLF: MOCK: Hello\n')
+            # respond with an ok or an error
+            ok = cwm.Ok(200, self._streams.values())
+            self.write(ok)
+        elif isinstance(msg, cwm.Notify):
+            print('SLF: MOCK: Notify\n')
+            # respond with notifyack
+            try:
+                por = self._streams[msg.stream_id][2]
+            except:
+                por = 0
+            notify_ack = cwm.NotifyAck(
+                True,
+                msg.stream_id,
+                por)
+            self._streams[msg.stream_id] = [msg.stream_id,
+                                            msg.stream_name,
+                                            por]
+            self.write(notify_ack)
+        elif isinstance(msg, cwm.Message):
+            print('SLF: MOCK: Message: {}\n'.format(msg.message))
+            # no response, just print
+            self.handle_message(msg)
+        elif isinstance(msg, cwm.Error):
+            print('SLF: MOCK: Error\n')
+            # Got error message from worker
+            # close the connection and pass msg to the error handler
+            print("Received an error message. closing the connection")
+            self.close()
+            raise Exception(msg.message)
+        else:
+            print('SLF: MOCK: WTF?\n')
+            # write the original message back
+            self.write(msg)
+
+    def handle_message(self, msg):
+        # send an ack every 100 messages
+        if msg.message_id:
+            self._streams[msg.stream_id][2] = msg.message_id
+        if msg.flags & cwm.Message.Eos:
+            # ack eos
+            print("NH: acking eos for {}".format(msg))
+            self.write(cwm.Ack(credits = 1,
+                               acks= [(msg.stream_id, self._streams[msg.stream_id][2])]))
+
+    def write(self, msg):
+        print("write {}".format(msg))
+        data = cwm.Frame.encode(msg)
+        super(AsyncServer, self).push(data)
+
+    def updated_received_count(self):
+        if self.received_count % 200 == 0:
+            # but reset point_of_ref back to 0 every 500
+            # ... yes this will cause the sender to run forever.
+            print("Sending ack for streams!")
+            ack = cwm.Ack(
+                credits = 200,
+                acks = [
+                    (sid, por) for sid, _, por in self._streams.values()])
+            self.write(ack)
+        if self.received_count % 1000 == 0:
+            # send a restart every 1000 messages
+            print('PERIODIC RESTART, what could possibly go wrong?')
+            self.write(cwm.Restart())
+
+    def handle_error(self):
+        _type, _value, _traceback = sys.exc_info()
+        traceback.print_exception(_type, _value, _traceback)
+
+    def close(self):
+        print("Closing the connection")
+        print("last received id by stream:\n\t{}".format(
+            "\n\t".join("{}, {}: {}".format(sid, sn, mid)
+                      for sid, sn, mid in self._streams.values())))
+        super(AsyncServer, self).close()
+
+
+class EchoServer(asyncore.dispatcher):
+
+    def __init__(self, host, port):
+        asyncore.dispatcher.__init__(self)
+        self.create_socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+        self.set_reuse_addr()
+        self.bind((host, port))
+        self.listen(1)
+        self.count = 0
+        self._streams = {}
+
+    def handle_accepted(self, sock, addr):
+        print('Incoming connection from %s' % repr(addr))
+        handler = AsyncServer(self.count, sock, self._streams)
+        self.count += 1
+
+server = EchoServer('127.0.0.1', 7200)
+print("server: ", server)
+print("asyncore file: ", asyncore.__file__)
+asyncore.loop(timeout=0.000001)

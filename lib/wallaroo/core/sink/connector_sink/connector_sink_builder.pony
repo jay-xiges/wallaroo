@@ -53,7 +53,7 @@ primitive ConnectorSinkConfigCLIParser
 
     for output in outputs.split(",").values() do
       let o = output.split(":")
-      opts.push(ConnectorSinkConfigOptions(o(0)?, o(1)?))
+      opts.push(ConnectorSinkConfigOptions(o(0)?, o(1)?, "Dragons Love Tacos!!!SLF TODO: CONFIGURE ME!"))
     end
 
     consume opts
@@ -61,18 +61,22 @@ primitive ConnectorSinkConfigCLIParser
 class val ConnectorSinkConfigOptions
   let host: String
   let service: String
+  let cookie: String
 
-  new val create(host': String, service': String) =>
+  new val create(host': String, service': String, cookie': String) =>
     host = host'
     service = service'
+    cookie = cookie'
 
 class val ConnectorSinkConfig[Out: Any val] is SinkConfig[Out]
   let _encoder: ConnectorSinkEncoder[Out]
   let _host: String
   let _service: String
+  let _cookie: String
   let _initial_msgs: Array[Array[ByteSeq] val] val
 
-  new val create(encoder: ConnectorSinkEncoder[Out], host: String, service: String,
+  new val create(encoder: ConnectorSinkEncoder[Out],
+    host: String, service: String, cookie: String,
     initial_msgs: Array[Array[ByteSeq] val] val =
     recover Array[Array[ByteSeq] val] end)
   =>
@@ -80,6 +84,7 @@ class val ConnectorSinkConfig[Out: Any val] is SinkConfig[Out]
     _initial_msgs = initial_msgs
     _host = host
     _service = service
+    _cookie = cookie
 
   new val from_options(encoder: ConnectorSinkEncoder[Out], opts: ConnectorSinkConfigOptions,
     initial_msgs: Array[Array[ByteSeq] val] val =
@@ -89,6 +94,7 @@ class val ConnectorSinkConfig[Out: Any val] is SinkConfig[Out]
     _initial_msgs = initial_msgs
     _host = opts.host
     _service = opts.service
+    _cookie = opts.cookie
 
 
   fun apply(): SinkBuilder =>
@@ -114,7 +120,7 @@ class val ConnectorSinkBuilder
     barrier_initiator: BarrierInitiator, checkpoint_initiator: CheckpointInitiator,
     recovering: Bool): Sink
   =>
-    @printf[I32](("Connecting to sink at " + _host + ":" + _service + "\n")
+    @printf[I32](("ConnectorSinkBuilder: Connecting to sink at " + _host + ":" + _service + "\n")
       .cstring())
 
     let id: RoutingId = RoutingIdGenerator()

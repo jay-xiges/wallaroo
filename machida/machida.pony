@@ -1043,7 +1043,11 @@ primitive _SinkConfig
         PyConnectorEncoder(encoderp)
       end
 
-      ConnectorSinkConfig[PyData val](encoder, host, port)
+      let cookie = recover val
+        String.copy_cstring(@PyString_AsString(@PyTuple_GetItem(sink_config_tuple, 5)))
+      end
+
+      ConnectorSinkConfig[PyData val](encoder, host, port, cookie)
     else
       error
     end
