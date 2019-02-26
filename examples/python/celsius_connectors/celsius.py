@@ -66,7 +66,7 @@ def decode_feed(data):
 
 @wallaroo.experimental.stream_message_encoder
 def encode_conversion(data):
-    return str(data).encode('utf-8')
+    return ("XYZ"+str(data)).encode('utf-8')
 
 
 @wallaroo.experimental.stream_message_decoder
