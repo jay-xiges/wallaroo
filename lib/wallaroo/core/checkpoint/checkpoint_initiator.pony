@@ -273,6 +273,13 @@ actor CheckpointInitiator is Initializable
         for w in _workers.values() do
           ws.push(w)
         end
+        if checkpoint_id <= 1 then
+          Fail()
+        else
+          // TODO: This isn't right, what if we have two aborted checkpoints
+          // in a row?
+          r.update_checkpoint_id(checkpoint_id - 1)
+        end
         r.start_recovery(consume ws where with_reconnect = false)
       else
         Fail()
@@ -388,6 +395,7 @@ actor CheckpointInitiator is Initializable
 
   fun ref _clear_pending_checkpoints() =>
     _checkpoint_group = _checkpoint_group + 1
+    @printf[I32]("CheckpointInitiator: _timers.dispose()\n".cstring())
     _timers.dispose()
     _timers = Timers
 
@@ -545,5 +553,6 @@ class _InitiateCheckpoint is TimerNotify
     _checkpoint_group = checkpoint_group
 
   fun ref apply(timer: Timer, count: U64): Bool =>
+    @printf[I32]("_InitiateCheckpoint: timer fired\n".cstring())
     _si.initiate_checkpoint(_checkpoint_group)
     false

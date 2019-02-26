@@ -36,4 +36,6 @@ interface val SinkBuilder
   fun apply(sink_name: String, event_log: EventLog,
     reporter: MetricsReporter iso, env: Env,
     barrier_coordinator: BarrierCoordinator,
-    checkpoint_initiator: CheckpointInitiator, recovering: Bool): Sink
+    barrier_initiator: BarrierInitiator,
+    checkpoint_initiator: CheckpointInitiator, recovering: Bool,
+    worker_name: WorkerName, auth: AmbientAuth): Sink

@@ -184,6 +184,7 @@ class FileBackend is Backend
     // (resilient_id, payload, is_last_entry)
     var replay_buffer: Array[(RoutingId, ByteSeq val, Bool)] ref =
       replay_buffer.create()
+    var replay_resilients: SetIs[RoutingId] = replay_resilients.create()
     var current_checkpoint_id: CheckpointId = 0
     var target_checkpoint_offset_start: USize = 0
     var target_checkpoint_offset_end: USize = 0
@@ -255,10 +256,12 @@ class FileBackend is Backend
         end
         // put entry into temporary recovered buffer
         replay_buffer.push((resilient_id, payload, is_last_entry))
+        replay_resilients.set(resilient_id)
       | _LogCheckpointIdEntry =>
         break
       | _LogRestartEntry =>
         replay_buffer.clear()
+        replay_resilients.clear()
         _file.seek(_restart_len.isize() - 1)
       end
     end
@@ -272,7 +275,7 @@ class FileBackend is Backend
     _file.seek_end(0)
 
     var num_replayed: USize = 0
-    _event_log.expect_rollback_count(replay_buffer.size())
+    _event_log.expect_rollback_count(replay_resilients.size())
     for entry in replay_buffer.values() do
       num_replayed = num_replayed + 1
       _event_log.rollback_from_log_entry(entry._1, entry._2, entry._3,
