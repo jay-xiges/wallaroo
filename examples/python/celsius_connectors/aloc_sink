@@ -11,10 +11,12 @@ import traceback
 from wallaroo.experimental import connector_wire_messages as cwm
 
 class AsyncServer(asynchat.async_chat, object):
-    def __init__(self, handler_id, sock, streams=None):
+    def __init__(self, handler_id, sock, out_path, abort_rule_path, streams=None):
         print("AsyncServer.__init__", handler_id, sock)
         self._id = handler_id
         self._conn = sock
+        self._out_path = out_path
+        self._abort_rule_path = abort_rule_path
         asynchat.async_chat.__init__(self, sock=self._conn)
         self.in_buffer = []
         self.out_buffer = []
@@ -137,21 +139,28 @@ class AsyncServer(asynchat.async_chat, object):
 
 class EchoServer(asyncore.dispatcher):
 
-    def __init__(self, host, port):
+    def __init__(self, host, port, out_path, abort_rule_path):
         asyncore.dispatcher.__init__(self)
         self.create_socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         self.set_reuse_addr()
         self.bind((host, port))
         self.listen(1)
+        self._out_path = out_path
+        self._abort_rule_path = abort_rule_path
         self.count = 0
         self._streams = {}
 
     def handle_accepted(self, sock, addr):
         print('Incoming connection from %s' % repr(addr))
-        handler = AsyncServer(self.count, sock, self._streams)
+        handler = AsyncServer(self.count, sock,
+            self._out_path, self._abort_rule_path, self._streams)
         self.count += 1
 
-server = EchoServer('127.0.0.1', 7200)
+out_path = sys.argv[1]
+abort_rule_path = sys.argv[2]
+print("out_path: ", out_path)
+print ("abort_rule_path: ", abort_rule_path)
+server = EchoServer('127.0.0.1', 7200, out_path, abort_rule_path)
 print("server: ", server)
 print("asyncore file: ", asyncore.__file__)
-asyncore.loop(timeout=0.000001)
+asyncore.loop(timeout=0.001)

@@ -86,8 +86,9 @@ def terminate(_signal=None, _frame=None):
 
 
 sink = subprocess.Popen([
-    ## SLF: For now, this takes the place of a connector sink v2.
-    "./mock_at_least_once_server2"])
+    "./aloc_sink",
+    "/tmp/aloc_sink.out",
+    "./aloc_sink.abort-rules"])
 
 print("Ensuring connectors are initialized")
 time.sleep(1)
