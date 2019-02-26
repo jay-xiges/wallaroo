@@ -10,6 +10,17 @@ import traceback
 
 from wallaroo.experimental import connector_wire_messages as cwm
 
+def parse_abort_rules(path):
+    a = []
+    try:
+        with open(path, 'rb') as f:
+            for l in f:
+                print('DBG: got line: ', l)
+                a.append(eval(l))
+        return a
+    except FileNotFoundError:
+        return []
+
 class AsyncServer(asynchat.async_chat, object):
     def __init__(self, handler_id, sock, out_path, abort_rule_path, streams=None):
         print("AsyncServer.__init__", handler_id, sock)
@@ -27,6 +38,9 @@ class AsyncServer(asynchat.async_chat, object):
         self.received_count = 0
         self._reset_count = {}
 
+        self._abort_rules = parse_abort_rules(self._abort_rule_path)
+        print('DBG: abort rules = {}'.format(self._abort_rules))
+
     def collect_incoming_data(self, data):
         """Buffer the data"""
         self.in_buffer.append(data)
@@ -42,30 +56,30 @@ class AsyncServer(asynchat.async_chat, object):
             h = struct.unpack(">I", b"".join(self.in_buffer))[0]
             self.in_buffer = []
             self.set_terminator(h)
-            print('SLF: MOCK: got header, body size = {}'.format(h))
+            print('DBG: got header, body size = {}'.format(h))
         else:
             # Read the payload and pass it to _handle_frame
             frame_data = b"".join(self.in_buffer)
             self.in_buffer = []
             self.set_terminator(4) # read next frame header
             self.reading_header = True
-            print('SLF: MOCK: got bytes = {}'.format(frame_data))
+            print('DBG: got bytes = {}'.format(frame_data))
             self._handle_frame(frame_data)
 
     def _handle_frame(self, frame):
-        print('SLF: MOCK: _handle_frame {}'.format(frame))
+        print('DBG: _handle_frame {}'.format(frame))
         self.received_count += 1
         self.updated_received_count()
         msg = cwm.Frame.decode(frame)
         # Hello, Ok, Error, Notify, NotifyAck, Message, Ack, Restart
         self.count = 0
         if isinstance(msg, cwm.Hello):
-            print('SLF: MOCK: Hello\n')
+            print('DBG: Hello\n')
             # respond with an ok or an error
             ok = cwm.Ok(200, self._streams.values())
             self.write(ok)
         elif isinstance(msg, cwm.Notify):
-            print('SLF: MOCK: Notify\n')
+            print('DBG: Notify\n')
             # respond with notifyack
             try:
                 por = self._streams[msg.stream_id][2]
@@ -80,22 +94,31 @@ class AsyncServer(asynchat.async_chat, object):
                                             por]
             self.write(notify_ack)
         elif isinstance(msg, cwm.Message):
-            print('SLF: MOCK: Message: {}\n'.format(msg.message))
+            print('DBG: Message: {}\n'.format(msg))
             # no response, just print
             self.handle_message(msg)
         elif isinstance(msg, cwm.Error):
-            print('SLF: MOCK: Error\n')
+            print('DBG: Error\n')
             # Got error message from worker
             # close the connection and pass msg to the error handler
             print("Received an error message. closing the connection")
             self.close()
             raise Exception(msg.message)
         else:
-            print('SLF: MOCK: WTF?\n')
+            print('DBG: WTF?\n')
             # write the original message back
             self.write(msg)
 
     def handle_message(self, msg):
+        if msg.stream_id == 0:
+            self.handle_message_stream0(msg)
+        else:
+            self.handle_message_streamx(msg)
+
+    def handle_message_streamx(self, msg):
+        raise "Stream ID 0 not implemented"
+
+    def handle_message_streamx(self, msg):
         # send an ack every 100 messages
         if msg.message_id:
             self._streams[msg.stream_id][2] = msg.message_id

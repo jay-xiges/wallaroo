@@ -1,0 +1,5 @@
+("local-txn", 999999997)
+("local-txn", 999999998)
+("local-txn", 999999999)
+("txnid-regexp", "REGEXP GOES HERE --Kilroy")
+("stream-content", "STREAM ID HERE", "REGEXP HERE")
