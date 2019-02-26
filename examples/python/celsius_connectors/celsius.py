@@ -64,9 +64,9 @@ def decode_feed(data):
     return struct.unpack(">f", data)[0]
 
 
-@wallaroo.experimental.stream_message_encoder
+@wallaroo.experimental.octet_message_encoder
 def encode_conversion(data):
-    return ("XYZ"+str(data)).encode('utf-8')
+    return str(data).encode('utf-8')
 
 
 @wallaroo.experimental.stream_message_decoder

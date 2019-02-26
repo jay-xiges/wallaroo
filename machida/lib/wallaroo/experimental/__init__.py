@@ -36,6 +36,17 @@ def stream_message_encoder(func):
     C = wallaroo._wallaroo_wrap(func.__name__, func, wallaroo.ConnectorEncoder)
     return C()
 
+def octet_message_decoder(func):
+    wallaroo._validate_arity_compatability(func.__name__, func, 1)
+    C = wallaroo._wallaroo_wrap(func.__name__, func, wallaroo.OctetDecoder)
+    return C()
+
+
+def octet_message_encoder(func):
+    wallaroo._validate_arity_compatability(func.__name__, func, 1)
+    C = wallaroo._wallaroo_wrap(func.__name__, func, wallaroo.OctetEncoder)
+    return C()
+
 
 class SourceConnectorConfig(object):
     def __init__(self, name, encoder, decoder, port, host='127.0.0.1'):
