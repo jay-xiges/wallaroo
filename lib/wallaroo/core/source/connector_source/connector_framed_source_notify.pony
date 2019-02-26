@@ -232,12 +232,20 @@ class ConnectorSourceNotify[In: Any val]
         end
 
         try
+          // TODO: check this is the right instance on the right worker, using
+          // the global map, for this stream id
+          // The global map is a local copy that is read-only except during
+          // stop the world
+          // if not the right worker, respond with correct worker info as part
+          // of error message
           if not _stream_map.contains(m.stream_id) then
+            // Adding new stream to worker stream map
             (_active_stream_registry as ConnectorSourceListener[In])
               .stream_notify(_session_tag, m.stream_id, m.stream_name,
                 m.point_of_ref, _connector_source as ConnectorSource[In])
             _stream_map(m.stream_id) = _StreamState(true, 0, 0, 0, 0)
           else
+            // Steam already in worker map
             _send_reply(source, cwm.NotifyAckMsg(false, m.stream_id, 0))
             return _continue_perhaps(source)
           end
