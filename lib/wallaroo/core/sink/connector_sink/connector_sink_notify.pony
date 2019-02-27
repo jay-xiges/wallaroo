@@ -36,7 +36,7 @@ class ConnectorSinkNotify
   var _point_of_ref: cp.MessageId = 0
   var _message_id: cp.MessageId = _point_of_ref
   // 2PC
-  var _rtag: U64 = 0
+  var _rtag: U64 = 77777
 
   fun ref accepted(conn: WallarooOutgoingNetworkActor ref) =>
     Unreachable()

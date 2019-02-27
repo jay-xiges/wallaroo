@@ -128,7 +128,15 @@ class AsyncServer(asynchat.async_chat, object):
             self.handle_message_streamx(msg)
 
     def handle_message_stream0(self, msg):
-        raise "Stream ID 0 not implemented"
+        msg2 = cwm.TwoPCFrame.decode(msg.message)
+        if isinstance(msg2, cwm.ListUncommitted):
+            uncommitted = ["doesnt exist txn1", "not real txn2"] # TODO use a real list
+            inner = cwm.ReplyUncommitted(msg2.rtag, uncommitted)
+            ## NO NO NO: self.write(m)
+            raise Exception("TODO, msg2 = {}, inner = {}".format(msg2, inner))
+            ## LEFT OFF HERE
+        else:
+            raise Exception("Stream ID 0 not implemented, msg2 = {}".format(msg2))
 
     def handle_message_streamx(self, msg):
         self._out.write(bytes(msg.message))
