@@ -854,7 +854,8 @@ class TwoPCFrame(object):
     def encode(cls, msg):
         frame_tag = cls._FRAME_TYPE_MAP[type(msg)]
         data = msg.encode()
-        return struct.pack('>IB', len(data)+1, frame_tag) + data
+        # Don't add length for this inner message type
+        return struct.pack('>B', frame_tag) + data
 
     @classmethod
     def decode(cls, bs): # bs does not include frame length header

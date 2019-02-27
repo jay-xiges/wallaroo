@@ -437,8 +437,8 @@ class RestartMsg is MessageTrait
 
 // 2PC messages
 
-type TwoPCMessage is ( ListUncommittedMsg /**** TODO |
-                       ReplyUncommittedMsg |
+type TwoPCMessage is ( ListUncommittedMsg |
+                       ReplyUncommittedMsg /**** TODO |
                        TwoPCPhase1Msg |
                        TwoPCReplyMsg |
                        TwoPCPhase2Msg ****/)
@@ -466,10 +466,11 @@ primitive TwoPCFrame
 primitive TwoPCFrameTag
   fun decode(rb: Reader): TwoPCMessage ? =>
     let frame_tag = rb.u8()?
+@printf[I32]("QQQ DBG: frame_tag %d\n".cstring(), frame_tag)
     match frame_tag
     | 201 => ListUncommittedMsg.decode(rb)?
-/**** TODO
     | 202 => ReplyUncommittedMsg.decode(consume rb)?
+/**** TODO
     | 203 => TwoPCPhase1Msg.decode(consume rb)?
     | 204 => TwoPCReplyMsg.decode(consume rb)?
     | 205 => TwoPCPhase2Msg.decode(consume rb)?
@@ -481,8 +482,8 @@ primitive TwoPCFrameTag
   fun apply(msg: TwoPCMessage): U8 =>
     match msg
     | let m: ListUncommittedMsg => 201
-/**** TODO
     | let m: ReplyUncommittedMsg => 202
+/**** TODO
     | let m: TwoPCPhase1Msg => 203
     | let m: TwoPCReplyMsg => 304
     | let m: TwoPCPhase2Msg => 205
@@ -501,4 +502,32 @@ class ListUncommittedMsg is MessageTrait
 
   fun encode(wb: Writer = Writer): Writer =>
     wb.u64_be(rtag)
+    wb
+
+class ReplyUncommittedMsg is MessageTrait
+  let rtag: U64
+  let txn_ids: Array[String] val
+
+  new create(rtag': U64, txn_ids': Array[String val] val) =>
+    rtag = rtag'
+    txn_ids = txn_ids'
+
+  new decode(rb: Reader)? =>
+    let rtag' = rb.u64_be()?
+    let a_len = rb.u32_be()?
+    let txn_ids' = recover trn Array[String] end
+    for i in col.Range[U32](0, a_len) do
+      let length = rb.u16_be()?.usize()
+      txn_ids'.push(String.from_array(rb.block(length)?))
+    end
+    rtag = rtag'
+    txn_ids = consume txn_ids'
+
+  fun encode(wb: Writer = Writer): Writer =>
+    wb.u64_be(rtag)
+    wb.u32_be(txn_ids.size().u32())
+    for txn_id in txn_ids.values() do
+      wb.u16_be(txn_id.size().u16())
+      wb.write(txn_id)
+    end
     wb

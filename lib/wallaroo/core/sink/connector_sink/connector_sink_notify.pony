@@ -179,7 +179,33 @@ class ConnectorSinkNotify
         _error_and_close(conn, "Bad FSM State: D" + _fsm_state().string())
       end
     | let m: cp.MessageMsg =>
-      _error_and_close(conn, "Bad FSM State: E" + _fsm_state().string())
+      // 2PC messages are sent via MessageMsg on stream_id 0.
+      if (m.stream_id != 0) or (m.message is None) then
+        _error_and_close(conn, "Bad FSM State: Ea" + _fsm_state().string())
+        return
+      end
+      try
+        let inner = cp.TwoPCFrame.decode(m.message as Array[U8] val)?
+        match inner
+        | let mi: cp.ReplyUncommittedMsg =>
+          for txn_id in mi.txn_ids.values() do
+            @printf[I32]("SLF TODO: DBG: rtag %lu txn_id %s\n".cstring(), mi.rtag, txn_id.cstring())
+          end
+          // TODO LEFT OFF HERE: send aborts for all relevant txn_ids
+
+          // This is a reply to a ListUncommitted message that we sent
+          // perhaps some time ago.  Meanwhile, it's possible that we
+          // have already started a new round of 2PC ... so our new
+          // round's txn_id may be in the txn_id's list.
+          // TODO: Filter out any current txn_id before sending the
+          // txn abort messages.
+        else
+          Fail()
+        end
+      else
+        _error_and_close(conn, "Bad FSM State: Eb" + _fsm_state().string())
+        return
+      end
     | let m: cp.AckMsg =>
       if _fsm_state is cp.ConnectorProtoFsmStreaming then
         @printf[I32]("SLF TODO: Ack: credits %d list size = %d\n".cstring(), m.credits, m.credit_list.size())
