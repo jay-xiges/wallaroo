@@ -840,12 +840,50 @@ class ReplyUncommitted(object):
             acks.append((stream_id, point_of_ref))
         return Ack(credits, acks)
 
+class TwoPCPhase2(object):
+    """
+    TwoPCPhase2(txn_id: String, commit: Boolean)
+    """
+    def __init__(self, txn_id, commit):
+        self.txn_id = txn_id
+        self.commit = commit
+
+    def __str__(self):
+        return "TwoPCPhase2(txn_id={!r},commit={!r})".format(self.txn_id, self.commit)
+
+    def __eq__(self, other):
+        return (self.txn_id == other.txn_id and
+                self.commit == other.commit)
+
+    def encode(self):
+        if self.commit:
+            commit_c = '\01'
+        else:
+            commit_c = '\00'
+        return struct.pack(">H{}sc".format(len(txn_id)),
+                           len(txn_id),
+                           txn_id,
+                           commit_c)
+
+    @staticmethod
+    def decode(bs):
+        reader = StringIO(bs)
+        length = struct.unpack(">H", reader.read(2))[0]
+        txn_id = reader.read(length).decode()
+        commit_c = reader.read(1)
+        if commit_c == '\01':
+            commit = True
+        else:
+            commit = False
+        return TwoPCPhase2(txn_id, commit)
+
+
 class TwoPCFrame(object):
     _FRAME_TYPE_TUPLES = [(201, ListUncommitted) ,
-                          (202, ReplyUncommitted) #,
+                          (202, ReplyUncommitted) ,
                           #(203, TwoPCPhase1),
                           #(204, TwoPCReply),
-                          #(205, TwoPCPhase2)
+                          (205, TwoPCPhase2)
                           ]
     _FRAME_TYPE_MAP = dict([(v, t) for v, t in _FRAME_TYPE_TUPLES] +
                            [(t, v) for v, t in _FRAME_TYPE_TUPLES])

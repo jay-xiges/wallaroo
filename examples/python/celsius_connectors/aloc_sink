@@ -135,6 +135,10 @@ class AsyncServer(asynchat.async_chat, object):
             reply_bytes = cwm.TwoPCFrame.encode(reply)
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
+        elif isinstance(msg2, cwm.TwoPCPhase2):
+            print('DBG: 2PC Phase2 txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+
+            # TODO: Do real txn commit/abort stuff
         else:
             raise Exception("Stream ID 0 not implemented, msg2 = {}".format(msg2))
 

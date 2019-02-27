@@ -194,6 +194,7 @@ class ConnectorSinkNotify
           // round's txn_id may be in the txn_id's list.
           // TODO: Filter out any current txn_id before sending the
           // txn abort messages.
+          // TODO: Double-check rtag # for sanity.
           for txn_id in mi.txn_ids.values() do
             @printf[I32]("SLF TODO: DBG: rtag %lu txn_id %s\n".cstring(), mi.rtag, txn_id.cstring())
             let abort = make_2pc_phase2(txn_id, false)
