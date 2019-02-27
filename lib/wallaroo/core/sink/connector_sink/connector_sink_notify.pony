@@ -37,6 +37,7 @@ class ConnectorSinkNotify
   var _message_id: cp.MessageId = _point_of_ref
   // 2PC
   var _rtag: U64 = 77777
+  var sink_ready_to_receive: Bool = false
 
   fun ref accepted(conn: WallarooOutgoingNetworkActor ref) =>
     Unreachable()
@@ -49,13 +50,35 @@ class ConnectorSinkNotify
 
   fun ref connected(conn: WallarooOutgoingNetworkActor ref) =>
     @printf[I32]("ConnectorSink connected\n".cstring())
+    _header = true
+    _throttled = false
+    sink_ready_to_receive = false
     conn.expect(4)
+
     // SLF: TODO: configure version string
     // SLF: TODO: configure cookie string
     // SLF: TODO: configure program string
     // SLF: TODO: configure instance_name string
     let hello = cp.HelloMsg("v0.0.1", "Dragons Love Tacos", "a program", "an instance")
     _send_msg(conn, hello)
+
+    // 2PC: We don't know how many transactions the sink has that
+    // have been waiting for a phase 2 message.  We need to discover
+    // their txn_id strings and abort them.
+    let list_u = make_2pc_list_uncommitted()
+    try
+      let list_u_msg =
+        cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [list_u])?
+      _send_msg(conn, list_u_msg)
+    else
+      Fail()
+    end
+
+    // 2PC: We also don't know how much fine-grained control the sink
+    // has for selectively aborting & committing the stuff that we
+    // send to it.  Thus, we should not send any Wallaroo app messages
+    // to the sink until we get a ReplyUncommittedMsg response.
+
     _fsm_state = cp.ConnectorProtoFsmHandshake
 
   fun ref closed(conn: WallarooOutgoingNetworkActor ref) =>
@@ -131,7 +154,7 @@ class ConnectorSinkNotify
     w2.write(b)
 
     let b2 = recover trn w2.done() end
-    try (conn as ConnectorSink ref)._writev(consume b2, None) else Fail() end
+    try (conn as ConnectorSink ref)._writev(consume b2, None, true) else Fail() end
 
   fun ref _process_connector_sink_v2_data(
     conn: WallarooOutgoingNetworkActor ref, data: Array[U8] val): None ?
@@ -165,15 +188,6 @@ class ConnectorSinkNotify
         if m.point_of_ref > 0 then
           _point_of_ref = m.point_of_ref
           _message_id = _point_of_ref
-        end
-
-        let list_u = make_2pc_list_uncommitted()
-        try
-          let list_u_msg =
-            cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [list_u])?
-          _send_msg(conn, list_u_msg)
-        else
-          Fail()
         end
       else
         _error_and_close(conn, "Bad FSM State: D" + _fsm_state().string())
@@ -212,6 +226,8 @@ class ConnectorSinkNotify
           let commit_msg =
             cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [commit])?
           _send_msg(conn, commit_msg)
+
+          sink_ready_to_receive = true
         else
           Fail()
         end

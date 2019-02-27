@@ -588,7 +588,8 @@ actor ConnectorSink is Sink
       _try_shutdown()
     end
 
-  fun ref _writev(data: ByteSeqIter, tracking_id: (SeqId | None))
+  fun ref _writev(data: ByteSeqIter, tracking_id: (SeqId | None),
+    force_write: Bool = false)
   =>
     """
     Write a sequence of sequences of bytes.
@@ -610,7 +611,7 @@ actor ConnectorSink is Sink
       end
     end
 
-    _pending_writes()
+    _pending_writes(force_write)
 
     _in_sent = false
 
@@ -781,13 +782,20 @@ actor ConnectorSink is Sink
     """
     Resume writing.
     """
+    // SLF TODO: Oops, I bet that we can deadlock here with 2PC waiting
+    // for UncommittedReplyMsg: the connector protocol's HelloMsg and
+    // 2PC's ListUncommittedMsg items are written.
     _pending_writes()
 
-  fun ref _pending_writes(): Bool =>
+  fun ref _pending_writes(force_write: Bool = false): Bool =>
     """
     Send pending data. If any data can't be sent, keep it and mark as not
     writeable. On an error, dispose of the connection. Returns whether
     it sent all pending data or not.
+    If force_write is true, then this is data that cannot be delayed by
+    the _notify.sink_ready_to_receive flag.  However, this is probably
+    terribly deadlock-prone, because the actual-do-not-delay data
+    is already _pending_writev but we don't know exactly "where".
     """
     // TODO: Make writev_batch_size user configurable
     let writev_batch_size: USize = @pony_os_writev_max[I32]().usize()
@@ -798,6 +806,14 @@ actor ConnectorSink is Sink
     // nothing to send
     if _pending_writev_total == 0 then
       return true
+    end
+
+    // 2PC: If we haven't yet discovered and aborted txns left over from
+    // a previous session, then we must wait until that part of the
+    // protocol has finished.
+    if (not _notify.sink_ready_to_receive) and (not force_write) then
+      @printf[I32]("DBG: not _notify.sink_ready_to_receive\n".cstring())
+      return false
     end
 
     while _writeable and not _shutdown_peer and (_pending_writev_total > 0) do
