@@ -66,7 +66,8 @@ def decode_feed(data):
 
 @wallaroo.experimental.octet_message_encoder
 def encode_conversion(data):
-    return str(data).encode('utf-8')
+    # Let's make line-oriented output
+    return (str(data) + '\n').encode('utf-8')
 
 
 @wallaroo.experimental.stream_message_decoder

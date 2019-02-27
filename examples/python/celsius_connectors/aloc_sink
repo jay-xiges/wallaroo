@@ -8,6 +8,12 @@ import struct
 import sys
 import traceback
 
+# NOTES:
+#
+# 1. This server will truncate the out_path & out_path+".txnlog" files.
+#    If you want to preserve their data, then move them out of the way
+#    before starting this server.
+
 from wallaroo.experimental import connector_wire_messages as cwm
 
 def parse_abort_rules(path):
@@ -27,6 +33,9 @@ class AsyncServer(asynchat.async_chat, object):
         self._id = handler_id
         self._conn = sock
         self._out_path = out_path
+        self._out = open(self._out_path, 'wb')
+        self._out_bytes = 0
+        self._txn_log = open(self._out_path + ".txnlog", 'wb')
         self._abort_rule_path = abort_rule_path
         asynchat.async_chat.__init__(self, sock=self._conn)
         self.in_buffer = []
@@ -80,6 +89,10 @@ class AsyncServer(asynchat.async_chat, object):
             self.write(ok)
         elif isinstance(msg, cwm.Notify):
             print('DBG: Notify\n')
+            if msg.stream_id != 1:
+                error = cwm.Error("Unsupported stream id {}".format(msg.stream_id))
+                self.write(error)
+                return
             # respond with notifyack
             try:
                 por = self._streams[msg.stream_id][2]
@@ -95,7 +108,6 @@ class AsyncServer(asynchat.async_chat, object):
             self.write(notify_ack)
         elif isinstance(msg, cwm.Message):
             print('DBG: Message: {}\n'.format(msg))
-            # no response, just print
             self.handle_message(msg)
         elif isinstance(msg, cwm.Error):
             print('DBG: Error\n')
@@ -119,6 +131,9 @@ class AsyncServer(asynchat.async_chat, object):
         raise "Stream ID 0 not implemented"
 
     def handle_message_streamx(self, msg):
+        self._out.write(bytes(msg.message))
+        self._out.flush()
+        self._out_bytes += len(msg.message)
         # send an ack every 100 messages
         if msg.message_id:
             self._streams[msg.stream_id][2] = msg.message_id
@@ -127,6 +142,7 @@ class AsyncServer(asynchat.async_chat, object):
             print("NH: acking eos for {}".format(msg))
             self.write(cwm.Ack(credits = 1,
                                acks= [(msg.stream_id, self._streams[msg.stream_id][2])]))
+        print('DBG: _out_bytes {} message_id {}'.format(self._out_bytes, msg.message_id))
 
     def write(self, msg):
         print("write {}".format(msg))
