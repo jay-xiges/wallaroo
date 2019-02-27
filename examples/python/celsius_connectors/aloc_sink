@@ -127,7 +127,7 @@ class AsyncServer(asynchat.async_chat, object):
         else:
             self.handle_message_streamx(msg)
 
-    def handle_message_streamx(self, msg):
+    def handle_message_stream0(self, msg):
         raise "Stream ID 0 not implemented"
 
     def handle_message_streamx(self, msg):

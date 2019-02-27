@@ -434,3 +434,71 @@ class RestartMsg is MessageTrait
   new  decode(rb: Reader) =>
     """
     """
+
+// 2PC messages
+
+type TwoPCMessage is ( ListUncommittedMsg /**** TODO |
+                       ReplyUncommittedMsg |
+                       TwoPCPhase1Msg |
+                       TwoPCReplyMsg |
+                       TwoPCPhase2Msg ****/)
+
+primitive TwoPCFrame
+  fun encode(msg: TwoPCMessage, wb: Writer = Writer): Array[U8] val =>
+    let encoded = msg.encode()
+    wb.u8(TwoPCFrameTag(msg))
+    wb.writev(encoded.done())
+    let bs: Array[ByteSeq val] val = wb.done()
+    recover
+      let a = Array[U8]
+      for b in bs.values() do
+        a.append(b)
+      end
+      a
+    end
+
+  fun decode(data: Array[U8] val): TwoPCMessage ? =>
+    // read length
+    let rb = Reader
+    rb.append(data)
+    TwoPCFrameTag.decode(consume rb)?
+
+primitive TwoPCFrameTag
+  fun decode(rb: Reader): TwoPCMessage ? =>
+    let frame_tag = rb.u8()?
+    match frame_tag
+    | 201 => ListUncommittedMsg.decode(rb)?
+/**** TODO
+    | 202 => ReplyUncommittedMsg.decode(consume rb)?
+    | 203 => TwoPCPhase1Msg.decode(consume rb)?
+    | 204 => TwoPCReplyMsg.decode(consume rb)?
+    | 205 => TwoPCPhase2Msg.decode(consume rb)?
+****/
+    else
+      error
+    end
+
+  fun apply(msg: TwoPCMessage): U8 =>
+    match msg
+    | let m: ListUncommittedMsg => 201
+/**** TODO
+    | let m: ReplyUncommittedMsg => 202
+    | let m: TwoPCPhase1Msg => 203
+    | let m: TwoPCReplyMsg => 304
+    | let m: TwoPCPhase2Msg => 205
+****/
+    end
+
+class ListUncommittedMsg is MessageTrait
+  let rtag: U64
+
+  new create(rtag': U64) =>
+    rtag = rtag'
+
+  new decode(rb: Reader)? =>
+    let rtag' = rb.u64_be()?
+    rtag = rtag'
+
+  fun encode(wb: Writer = Writer): Writer =>
+    wb.u64_be(rtag)
+    wb

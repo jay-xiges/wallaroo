@@ -35,6 +35,8 @@ class ConnectorSinkNotify
   // SLF TODO: How do we get our initial point-of-reference from EventLog?
   var _point_of_ref: cp.MessageId = 0
   var _message_id: cp.MessageId = _point_of_ref
+  // 2PC
+  var _rtag: U64 = 0
 
   fun ref accepted(conn: WallarooOutgoingNetworkActor ref) =>
     Unreachable()
@@ -164,6 +166,14 @@ class ConnectorSinkNotify
           _point_of_ref = m.point_of_ref
           _message_id = _point_of_ref
         end
+
+        let list_u = make_list_uncommitted()
+        try
+          let list_u_msg = cp.MessageMsg(0, 0, 6666, 0, None, [list_u])?
+          _send_msg(conn, list_u_msg)
+        else
+          Fail()
+        end
       else
         _error_and_close(conn, "Bad FSM State: D" + _fsm_state().string())
       end
@@ -189,6 +199,12 @@ class ConnectorSinkNotify
       end
       conn.close()
     end
+
+  fun ref make_list_uncommitted(): Array[U8] val =>
+    _rtag = _rtag + 1
+    let wb: Writer = wb.create()
+    let m = cp.ListUncommittedMsg(_rtag)
+    cp.TwoPCFrame.encode(m, wb)
 
   fun ref _error_and_close(conn: WallarooOutgoingNetworkActor ref,
     msg: String)
