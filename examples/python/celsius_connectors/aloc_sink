@@ -46,6 +46,7 @@ class AsyncServer(asynchat.async_chat, object):
         self._streams = {} if streams is None else streams
         self.received_count = 0
         self._reset_count = {}
+        self._txn_state = {}
 
         self._abort_rules = parse_abort_rules(self._abort_rule_path)
         print('DBG: abort rules = {}'.format(self._abort_rules))
@@ -135,10 +136,15 @@ class AsyncServer(asynchat.async_chat, object):
             reply_bytes = cwm.TwoPCFrame.encode(reply)
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
+        elif isinstance(msg2, cwm.TwoPCPhase1):
+            print('TODO: 2PC Phase1')
         elif isinstance(msg2, cwm.TwoPCPhase2):
             print('DBG: 2PC Phase2 txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
-
-            # TODO: Do real txn commit/abort stuff
+            if msg2.txn_id in self._txn_state:
+                print('TODO: Do real txn commit/abort stuff for txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+            else:
+                print('TODO: Got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+            # No reply is required for Phase 2
         else:
             raise Exception("Stream ID 0 not implemented, msg2 = {}".format(msg2))
 

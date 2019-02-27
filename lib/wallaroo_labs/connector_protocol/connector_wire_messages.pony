@@ -439,10 +439,10 @@ class RestartMsg is MessageTrait
 
 type TwoPCMessage is ( ListUncommittedMsg |
                        ReplyUncommittedMsg |
-                       /**** TODO 
+                       /**** TODO
                        TwoPCPhase1Msg |
-                       TwoPCReplyMsg |
                         ****/
+                       TwoPCReplyMsg |
                        TwoPCPhase2Msg)
 
 primitive TwoPCFrame
@@ -474,8 +474,8 @@ primitive TwoPCFrameTag
     | 202 => ReplyUncommittedMsg.decode(consume rb)?
 /**** TODO
     | 203 => TwoPCPhase1Msg.decode(consume rb)?
-    | 204 => TwoPCReplyMsg.decode(consume rb)?
 ****/
+    | 204 => TwoPCReplyMsg.decode(consume rb)?
     | 205 => TwoPCPhase2Msg.decode(consume rb)?
     else
       error
@@ -487,8 +487,8 @@ primitive TwoPCFrameTag
     | let m: ReplyUncommittedMsg => 202
 /**** TODO
     | let m: TwoPCPhase1Msg => 203
-    | let m: TwoPCReplyMsg => 304
 ****/
+    | let m: TwoPCReplyMsg => 204
     | let m: TwoPCPhase2Msg => 205
     end
 
@@ -534,22 +534,48 @@ class ReplyUncommittedMsg is MessageTrait
     end
     wb
 
-class TwoPCPhase2Msg is MessageTrait
-  let txn_id: String
-  let commit: Bool
+class TwoPCReplyMsg is MessageTrait
+  var txn_id: String = ""
+  var commit: Bool = false
 
   new create(txn_id': String, commit': Bool) =>
     txn_id = txn_id'
     commit = commit'
 
   new decode(rb: Reader)? =>
-    let length = rb.u16_be()?.usize()
-    let txn_id' = String.from_array(rb.block(length)?)
-    let commit' = if rb.u8()? == 0 then false else true end
+    (let txn_id', let commit') = _P.decode_phase2r(rb)?
     txn_id = txn_id'
     commit = commit'
 
   fun encode(wb: Writer = Writer): Writer =>
+    _P.encode_phase2r(txn_id, commit, wb)
+
+class TwoPCPhase2Msg is MessageTrait
+  var txn_id: String = ""
+  var commit: Bool = false
+
+  new create(txn_id': String, commit': Bool) =>
+    txn_id = txn_id'
+    commit = commit'
+
+  new decode(rb: Reader)? =>
+    (let txn_id', let commit') = _P.decode_phase2r(rb)?
+    txn_id = txn_id'
+    commit = commit'
+
+  fun encode(wb: Writer = Writer): Writer =>
+    _P.encode_phase2r(txn_id, commit, wb)
+
+primitive _P
+  fun decode_phase2r(rb: Reader): (String, Bool)?
+  =>
+    let length = rb.u16_be()?.usize()
+    let txn_id' = String.from_array(rb.block(length)?)
+    let commit' = if rb.u8()? == 0 then false else true end
+    (txn_id', commit')
+
+  fun encode_phase2r(txn_id: String, commit: Bool, wb: Writer): Writer
+  =>
     wb.u16_be(txn_id.size().u16())
     wb.write(txn_id)
     if commit then wb.u8(1) else wb.u8(0) end
