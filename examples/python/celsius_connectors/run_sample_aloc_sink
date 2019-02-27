@@ -39,11 +39,11 @@ class UDPHandler(SocketServer.BaseRequestHandler):
 def send_feed():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     value = 0.0
-    while value < 100:
+    while value < 300:
         packet = struct.pack(">f", value)
         sock.sendto(packet, ('127.0.0.1', 8801))
         value += 1
-        time.sleep(0.40)
+        time.sleep(0.040)
 
 
 def recv_conv():
