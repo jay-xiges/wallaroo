@@ -169,7 +169,8 @@ class ConnectorSinkNotify
 
         let list_u = make_list_uncommitted()
         try
-          let list_u_msg = cp.MessageMsg(0, 0, 6666, 0, None, [list_u])?
+          let list_u_msg =
+            cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [list_u])?
           _send_msg(conn, list_u_msg)
         else
           Fail()
