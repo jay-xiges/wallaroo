@@ -855,8 +855,7 @@ def decode_phase2r(bs):
     length = struct.unpack(">H", reader.read(2))[0]
     txn_id = reader.read(length).decode()
     commit_c = reader.read(1)
-    print('DDD DBG: commit_c = {}'.format(commit_c))
-    if commit_c == '\01':
+    if commit_c == b'\01':
         commit = True
     else:
         commit = False

@@ -137,13 +137,22 @@ class AsyncServer(asynchat.async_chat, object):
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
         elif isinstance(msg2, cwm.TwoPCPhase1):
-            raise Exception("TODO TWOPCPhase1 msg2 = {}".format(msg2))
+            self._txn_state[msg2.txn_id] = msg2.where_list
+            print('DBG: 2PC Phase 1 got {}'.format(msg2))
+            print('DBG: 2PC Phase 1 txn_state = {}'.format(self._txn_state))
+            # TODO: print state to _txn_log
+            # TODO: fsync
+            # TODO: reply success/fail
         elif isinstance(msg2, cwm.TwoPCReply):
             raise Exception("Bad stream ID 0 message: {}".format(msg2))
         elif isinstance(msg2, cwm.TwoPCPhase2):
             print('DBG: 2PC Phase2 txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
             if msg2.txn_id in self._txn_state:
                 print('TODO: Do real txn commit/abort stuff for txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+                # TODO: print state to _txn_log
+                # TODO: truncate & fsync on abort
+                del self._txn_state[msg2.txn_id]
+                print('DBG: 2PC Phase 2 txn_state = {}'.format(self._txn_state))
             else:
                 print('TODO: Got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
             # No reply is required for Phase 2
