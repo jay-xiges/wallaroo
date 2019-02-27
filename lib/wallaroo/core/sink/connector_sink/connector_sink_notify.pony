@@ -37,7 +37,6 @@ class ConnectorSinkNotify
   var _message_id: cp.MessageId = _point_of_ref
   // 2PC
   var _rtag: U64 = 77777
-  var sink_ready_to_receive: Bool = false
 
   fun ref accepted(conn: WallarooOutgoingNetworkActor ref) =>
     Unreachable()
@@ -52,7 +51,6 @@ class ConnectorSinkNotify
     @printf[I32]("ConnectorSink connected\n".cstring())
     _header = true
     _throttled = false
-    sink_ready_to_receive = false
     conn.expect(4)
 
     // SLF: TODO: configure version string
@@ -154,7 +152,7 @@ class ConnectorSinkNotify
     w2.write(b)
 
     let b2 = recover trn w2.done() end
-    try (conn as ConnectorSink ref)._writev(consume b2, None, true) else Fail() end
+    try (conn as ConnectorSink ref)._writev(consume b2, None) else Fail() end
 
   fun ref _process_connector_sink_v2_data(
     conn: WallarooOutgoingNetworkActor ref, data: Array[U8] val): None ?
@@ -209,12 +207,17 @@ class ConnectorSinkNotify
           // TODO: Filter out any current txn_id before sending the
           // txn abort messages.
           // TODO: Double-check rtag # for sanity.
-          for txn_id in mi.txn_ids.values() do
-            @printf[I32]("SLF TODO: DBG: rtag %lu txn_id %s\n".cstring(), mi.rtag, txn_id.cstring())
-            let abort = make_2pc_phase2(txn_id, false)
-            let abort_msg =
-              cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [abort])?
-            _send_msg(conn, abort_msg)
+          ifdef "trace" then
+            @printf[I32]("TRACE: uncommitted txns = %d\n".cstring(),
+              mi.txn_ids.size())
+            for txn_id in mi.txn_ids.values() do
+              @printf[I32]("TRACE: rtag %lu txn_id %s\n".cstring(), mi.rtag,
+                txn_id.cstring())
+              let abort = make_2pc_phase2(txn_id, false)
+              let abort_msg =
+                cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [abort])?
+              _send_msg(conn, abort_msg)
+            end
           end
 
           // TODO: remove this dev/scaffolding hack
@@ -226,8 +229,10 @@ class ConnectorSinkNotify
           let commit_msg =
             cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [commit])?
           _send_msg(conn, commit_msg)
+          // TODO: END OF remove this dev/scaffolding hack
 
-          sink_ready_to_receive = true
+          @printf[I32]("2PC: aborted %d stale transactions, unmuting upstreams\n".cstring(), mi.txn_ids.size())
+          try (conn as ConnectorSink ref)._unmute_upstreams() else Fail() end
         else
           Fail()
         end

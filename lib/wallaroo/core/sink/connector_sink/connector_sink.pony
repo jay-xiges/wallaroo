@@ -100,7 +100,9 @@ actor ConnectorSink is Sink
   // duplicate producers in this map (unlike _upstreams) since there might be
   // multiple upstream step ids over a boundary
   let _inputs: Map[RoutingId, Producer] = _inputs.create()
-  var _mute_outstanding: Bool = false
+  // 2PC: We must start with upstreams muted, until both OkMsg and
+  // ReplyUncommittedMsg have been processed.
+  var _mute_outstanding: Bool = true
 
   // Connector
   var _notify: ConnectorSinkNotify
@@ -300,7 +302,7 @@ actor ConnectorSink is Sink
       Fail()
     end
 
-    _maybe_mute_or_unmute_upstreams()
+    // 2PC: not now: _maybe_mute_or_unmute_upstreams()
 
   be update_router(router: Router) =>
     """
@@ -506,7 +508,7 @@ actor ConnectorSink is Sink
                 _release_backpressure()
               end
             end
-            _maybe_mute_or_unmute_upstreams()
+            // 2PC: not now: _maybe_mute_or_unmute_upstreams()
           else
             // The connection failed, unsubscribe the event and close.
             @pony_asio_event_unsubscribe(event)
@@ -541,7 +543,7 @@ actor ConnectorSink is Sink
                 //sent all data; release backpressure
                 _release_backpressure()
               end
-              _maybe_mute_or_unmute_upstreams()
+              // 2PC: not now: _maybe_mute_or_unmute_upstreams()
             end
           else
             // The connection failed, unsubscribe the event and close.
@@ -588,8 +590,7 @@ actor ConnectorSink is Sink
       _try_shutdown()
     end
 
-  fun ref _writev(data: ByteSeqIter, tracking_id: (SeqId | None),
-    force_write: Bool = false)
+  fun ref _writev(data: ByteSeqIter, tracking_id: (SeqId | None))
   =>
     """
     Write a sequence of sequences of bytes.
@@ -611,7 +612,7 @@ actor ConnectorSink is Sink
       end
     end
 
-    _pending_writes(force_write)
+    _pending_writes()
 
     _in_sent = false
 
@@ -782,20 +783,13 @@ actor ConnectorSink is Sink
     """
     Resume writing.
     """
-    // SLF TODO: Oops, I bet that we can deadlock here with 2PC waiting
-    // for UncommittedReplyMsg: the connector protocol's HelloMsg and
-    // 2PC's ListUncommittedMsg items are written.
     _pending_writes()
 
-  fun ref _pending_writes(force_write: Bool = false): Bool =>
+  fun ref _pending_writes(): Bool =>
     """
     Send pending data. If any data can't be sent, keep it and mark as not
     writeable. On an error, dispose of the connection. Returns whether
     it sent all pending data or not.
-    If force_write is true, then this is data that cannot be delayed by
-    the _notify.sink_ready_to_receive flag.  However, this is probably
-    terribly deadlock-prone, because the actual-do-not-delay data
-    is already _pending_writev but we don't know exactly "where".
     """
     // TODO: Make writev_batch_size user configurable
     let writev_batch_size: USize = @pony_os_writev_max[I32]().usize()
@@ -806,14 +800,6 @@ actor ConnectorSink is Sink
     // nothing to send
     if _pending_writev_total == 0 then
       return true
-    end
-
-    // 2PC: If we haven't yet discovered and aborted txns left over from
-    // a previous session, then we must wait until that part of the
-    // protocol has finished.
-    if (not _notify.sink_ready_to_receive) and (not force_write) then
-      @printf[I32]("DBG: not _notify.sink_ready_to_receive\n".cstring())
-      return false
     end
 
     while _writeable and not _shutdown_peer and (_pending_writev_total > 0) do
