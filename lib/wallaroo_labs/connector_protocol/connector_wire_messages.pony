@@ -438,10 +438,12 @@ class RestartMsg is MessageTrait
 // 2PC messages
 
 type TwoPCMessage is ( ListUncommittedMsg |
-                       ReplyUncommittedMsg /**** TODO |
+                       ReplyUncommittedMsg |
+                       /**** TODO 
                        TwoPCPhase1Msg |
                        TwoPCReplyMsg |
-                       TwoPCPhase2Msg ****/)
+                        ****/
+                       TwoPCPhase2Msg)
 
 primitive TwoPCFrame
   fun encode(msg: TwoPCMessage, wb: Writer = Writer): Array[U8] val =>
@@ -473,8 +475,8 @@ primitive TwoPCFrameTag
 /**** TODO
     | 203 => TwoPCPhase1Msg.decode(consume rb)?
     | 204 => TwoPCReplyMsg.decode(consume rb)?
-    | 205 => TwoPCPhase2Msg.decode(consume rb)?
 ****/
+    | 205 => TwoPCPhase2Msg.decode(consume rb)?
     else
       error
     end
@@ -486,8 +488,8 @@ primitive TwoPCFrameTag
 /**** TODO
     | let m: TwoPCPhase1Msg => 203
     | let m: TwoPCReplyMsg => 304
-    | let m: TwoPCPhase2Msg => 205
 ****/
+    | let m: TwoPCPhase2Msg => 205
     end
 
 class ListUncommittedMsg is MessageTrait
@@ -531,3 +533,25 @@ class ReplyUncommittedMsg is MessageTrait
       wb.write(txn_id)
     end
     wb
+
+class TwoPCPhase2Msg is MessageTrait
+  let txn_id: String
+  let commit: Bool
+
+  new create(txn_id': String, commit': Bool) =>
+    txn_id = txn_id'
+    commit = commit'
+
+  new decode(rb: Reader)? =>
+    let length = rb.u16_be()?.usize()
+    let txn_id' = String.from_array(rb.block(length)?)
+    let commit' = if rb.u8()? == 0 then false else true end
+    txn_id = txn_id'
+    commit = commit'
+
+  fun encode(wb: Writer = Writer): Writer =>
+    wb.u16_be(txn_id.size().u16())
+    wb.write(txn_id)
+    if commit then wb.u8(1) else wb.u8(0) end
+    wb
+

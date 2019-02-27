@@ -167,7 +167,7 @@ class ConnectorSinkNotify
           _message_id = _point_of_ref
         end
 
-        let list_u = make_list_uncommitted()
+        let list_u = make_2pc_list_uncommitted()
         try
           let list_u_msg =
             cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [list_u])?
@@ -188,17 +188,19 @@ class ConnectorSinkNotify
         let inner = cp.TwoPCFrame.decode(m.message as Array[U8] val)?
         match inner
         | let mi: cp.ReplyUncommittedMsg =>
-          for txn_id in mi.txn_ids.values() do
-            @printf[I32]("SLF TODO: DBG: rtag %lu txn_id %s\n".cstring(), mi.rtag, txn_id.cstring())
-          end
-          // TODO LEFT OFF HERE: send aborts for all relevant txn_ids
-
           // This is a reply to a ListUncommitted message that we sent
           // perhaps some time ago.  Meanwhile, it's possible that we
           // have already started a new round of 2PC ... so our new
           // round's txn_id may be in the txn_id's list.
           // TODO: Filter out any current txn_id before sending the
           // txn abort messages.
+          for txn_id in mi.txn_ids.values() do
+            @printf[I32]("SLF TODO: DBG: rtag %lu txn_id %s\n".cstring(), mi.rtag, txn_id.cstring())
+            let abort = make_2pc_phase2(txn_id, false)
+            let abort_msg =
+              cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [abort])?
+            _send_msg(conn, abort_msg)
+          end
         else
           Fail()
         end
@@ -227,10 +229,16 @@ class ConnectorSinkNotify
       conn.close()
     end
 
-  fun ref make_list_uncommitted(): Array[U8] val =>
+  fun ref make_2pc_list_uncommitted(): Array[U8] val =>
     _rtag = _rtag + 1
     let wb: Writer = wb.create()
     let m = cp.ListUncommittedMsg(_rtag)
+    cp.TwoPCFrame.encode(m, wb)
+
+  fun ref make_2pc_phase2(txn_id: String, commit: Bool): Array[U8] val =>
+    _rtag = _rtag + 1
+    let wb: Writer = wb.create()
+    let m = cp.TwoPCPhase2Msg(txn_id, commit)
     cp.TwoPCFrame.encode(m, wb)
 
   fun ref _error_and_close(conn: WallarooOutgoingNetworkActor ref,
