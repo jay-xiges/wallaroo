@@ -840,6 +840,91 @@ class ReplyUncommitted(object):
             acks.append((stream_id, point_of_ref))
         return Ack(credits, acks)
 
+def encode_phase2r(txn_id, commit):
+    if commit:
+        commit_c = '\01'
+    else:
+        commit_c = '\00'
+    return struct.pack(">H{}sc".format(len(txn_id)),
+                       len(txn_id),
+                       txn_id,
+                       commit_c)
+
+def decode_phase2r(bs):
+    reader = StringIO(bs)
+    length = struct.unpack(">H", reader.read(2))[0]
+    txn_id = reader.read(length).decode()
+    commit_c = reader.read(1)
+    print('DDD DBG: commit_c = {}'.format(commit_c))
+    if commit_c == '\01':
+        commit = True
+    else:
+        commit = False
+    return (txn_id, commit)
+
+class TwoPCPhase1(object):
+    """
+    TwoPCPhase1(txn_id: String,
+      where_list: [(stream_id: U64, start_por: U64, end_por: U64)])
+    """
+    def __init__(self, txn_id, where_list):
+        self.txn_id = txn_id
+        self.where_list = where_list
+
+    def __str__(self):
+        return "TwoPCPhase1(txn_id={!r},where_list={!r})".format(self.txn_id, self.where_list)
+
+    def __eq__(self, other):
+        return (self.txn_id == other.txn_id and
+                self.where_list == other.where_list)
+
+    def encode(self):
+        return (struct.pack(">H{}sI".format(len(txn_id)),
+                            len(txn_id),
+                            txn_id,
+                            len(where_list)) +
+                    b''.join((
+                        struct.pack('>QQQ',
+                            stream_id, start_por, end_por)
+                        for (stream_id, start_por, end_por) in self.where_list)))
+
+    @staticmethod
+    def decode(bs):
+        reader = StringIO(bs)
+        length = struct.unpack(">H", reader.read(2))[0]
+        txn_id = reader.read(length).decode()
+        where_list = []
+        length = struct.unpack(">I", reader.read(4))[0]
+        for i in range(0, length):
+            stream_id = struct.unpack(">Q", reader.read(8))[0]
+            start_por = struct.unpack(">Q", reader.read(8))[0]
+            end_por = struct.unpack(">Q", reader.read(8))[0]
+            where_list.append((stream_id, start_por, end_por))
+        return TwoPCPhase1(txn_id, where_list)
+
+class TwoPCReply(object):
+    """
+    TwoPCReply(txn_id: String, commit: Boolean)
+    """
+    def __init__(self, txn_id, commit):
+        self.txn_id = txn_id
+        self.commit = commit
+
+    def __str__(self):
+        return "TwoPCReply(txn_id={!r},commit={!r})".format(self.txn_id, self.commit)
+
+    def __eq__(self, other):
+        return (self.txn_id == other.txn_id and
+                self.commit == other.commit)
+
+    def encode(self):
+        return encode_phase2r(self.txn_id, self.commit)
+
+    @staticmethod
+    def decode(bs):
+        (txn_id, commit) = decode_phase2r(bs)
+        return TwoPCReply(txn_id, commit)
+
 class TwoPCPhase2(object):
     """
     TwoPCPhase2(txn_id: String, commit: Boolean)
@@ -856,33 +941,18 @@ class TwoPCPhase2(object):
                 self.commit == other.commit)
 
     def encode(self):
-        if self.commit:
-            commit_c = '\01'
-        else:
-            commit_c = '\00'
-        return struct.pack(">H{}sc".format(len(txn_id)),
-                           len(txn_id),
-                           txn_id,
-                           commit_c)
+        return encode_phase2r(self.txn_id, self.commit)
 
     @staticmethod
     def decode(bs):
-        reader = StringIO(bs)
-        length = struct.unpack(">H", reader.read(2))[0]
-        txn_id = reader.read(length).decode()
-        commit_c = reader.read(1)
-        if commit_c == '\01':
-            commit = True
-        else:
-            commit = False
+        (txn_id, commit) = decode_phase2r(bs)
         return TwoPCPhase2(txn_id, commit)
-
 
 class TwoPCFrame(object):
     _FRAME_TYPE_TUPLES = [(201, ListUncommitted) ,
                           (202, ReplyUncommitted) ,
-                          #(203, TwoPCPhase1),
-                          #(204, TwoPCReply),
+                          (203, TwoPCPhase1),
+                          (204, TwoPCReply),
                           (205, TwoPCPhase2)
                           ]
     _FRAME_TYPE_MAP = dict([(v, t) for v, t in _FRAME_TYPE_TUPLES] +

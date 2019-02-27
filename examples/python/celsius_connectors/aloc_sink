@@ -137,7 +137,9 @@ class AsyncServer(asynchat.async_chat, object):
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
         elif isinstance(msg2, cwm.TwoPCPhase1):
-            print('TODO: 2PC Phase1')
+            raise Exception("TODO TWOPCPhase1 msg2 = {}".format(msg2))
+        elif isinstance(msg2, cwm.TwoPCReply):
+            raise Exception("Bad stream ID 0 message: {}".format(msg2))
         elif isinstance(msg2, cwm.TwoPCPhase2):
             print('DBG: 2PC Phase2 txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
             if msg2.txn_id in self._txn_state:

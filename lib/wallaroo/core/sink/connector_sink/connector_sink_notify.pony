@@ -202,6 +202,16 @@ class ConnectorSinkNotify
               cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [abort])?
             _send_msg(conn, abort_msg)
           end
+
+          // TODO: remove this dev/scaffolding hack
+          let txn_id = "bogus-txn-0"
+          let p1 = make_2pc_phase1(txn_id, [(U64(1), U64(0), U64(50))])
+          let p1_msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [p1])?
+          _send_msg(conn, p1_msg)
+          let commit = make_2pc_phase2(txn_id, true)
+          let commit_msg =
+            cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [commit])?
+          _send_msg(conn, commit_msg)
         else
           Fail()
         end
@@ -236,8 +246,14 @@ class ConnectorSinkNotify
     let m = cp.ListUncommittedMsg(_rtag)
     cp.TwoPCFrame.encode(m, wb)
 
+  fun ref make_2pc_phase1(txn_id: String, where_list: cp.WhereList):
+    Array[U8] val
+  =>
+    let wb: Writer = wb.create()
+    let m = cp.TwoPCPhase1Msg(txn_id, where_list)
+    cp.TwoPCFrame.encode(m, wb)
+
   fun ref make_2pc_phase2(txn_id: String, commit: Bool): Array[U8] val =>
-    _rtag = _rtag + 1
     let wb: Writer = wb.create()
     let m = cp.TwoPCPhase2Msg(txn_id, commit)
     cp.TwoPCFrame.encode(m, wb)

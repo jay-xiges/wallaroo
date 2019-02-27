@@ -439,9 +439,7 @@ class RestartMsg is MessageTrait
 
 type TwoPCMessage is ( ListUncommittedMsg |
                        ReplyUncommittedMsg |
-                       /**** TODO
                        TwoPCPhase1Msg |
-                        ****/
                        TwoPCReplyMsg |
                        TwoPCPhase2Msg)
 
@@ -472,9 +470,7 @@ primitive TwoPCFrameTag
     match frame_tag
     | 201 => ListUncommittedMsg.decode(rb)?
     | 202 => ReplyUncommittedMsg.decode(consume rb)?
-/**** TODO
     | 203 => TwoPCPhase1Msg.decode(consume rb)?
-****/
     | 204 => TwoPCReplyMsg.decode(consume rb)?
     | 205 => TwoPCPhase2Msg.decode(consume rb)?
     else
@@ -485,9 +481,7 @@ primitive TwoPCFrameTag
     match msg
     | let m: ListUncommittedMsg => 201
     | let m: ReplyUncommittedMsg => 202
-/**** TODO
     | let m: TwoPCPhase1Msg => 203
-****/
     | let m: TwoPCReplyMsg => 204
     | let m: TwoPCPhase2Msg => 205
     end
@@ -531,6 +525,41 @@ class ReplyUncommittedMsg is MessageTrait
     for txn_id in txn_ids.values() do
       wb.u16_be(txn_id.size().u16())
       wb.write(txn_id)
+    end
+    wb
+
+type WhereList is Array[(U64, U64, U64)]
+
+class TwoPCPhase1Msg is MessageTrait
+  var txn_id: String = ""
+  var where_list: WhereList
+
+  new create(txn_id': String, where_list': WhereList) =>
+    txn_id = txn_id'
+    where_list = where_list'
+
+  new decode(rb: Reader)? =>
+    var length = rb.u16_be()?.usize()
+    let txn_id' = String.from_array(rb.block(length)?)
+    let where_list' = recover trn WhereList end
+    length = rb.u32_be()?.usize()
+    for i in col.Range[USize](0, length) do
+      let stream_id = rb.u64_be()?
+      let start_por = rb.u64_be()?
+      let end_por = rb.u64_be()?
+      where_list'.push((stream_id, start_por, end_por))
+    end
+    txn_id = txn_id'
+    where_list = consume where_list'
+
+  fun encode(wb: Writer = Writer): Writer =>
+    wb.u16_be(txn_id.size().u16())
+    wb.write(txn_id)
+    wb.u32_be(where_list.size().u32())
+    for (stream_id, start_por, end_por) in where_list.values() do
+      wb.u64_be(stream_id)
+      wb.u64_be(start_por)
+      wb.u64_be(end_por)
     end
     wb
 
