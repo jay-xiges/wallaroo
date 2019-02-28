@@ -3,9 +3,11 @@
 import asyncore
 import asynchat
 import random
+import re
 import socket
 import struct
 import sys
+import time
 import traceback
 
 # NOTES:
@@ -47,9 +49,17 @@ class AsyncServer(asynchat.async_chat, object):
         self.received_count = 0
         self._reset_count = {}
         self._txn_state = {}
+        self._txn_commit_next = True
+        self._txn_stream_content = []
 
         self._abort_rules = parse_abort_rules(self._abort_rule_path)
         print('DBG: abort rules = {}'.format(self._abort_rules))
+        for t in self._abort_rules:
+            if t[0] == "stream-content":
+                stream_id = t[1]
+                regexp = t[2]
+                print("DBG: STREAM {} REGEXP = {}".format(stream_id, regexp))
+                self._txn_stream_content.append((stream_id, regexp))
 
     def collect_incoming_data(self, data):
         """Buffer the data"""
@@ -131,44 +141,94 @@ class AsyncServer(asynchat.async_chat, object):
     def handle_message_stream0(self, msg):
         msg2 = cwm.TwoPCFrame.decode(msg.message)
         if isinstance(msg2, cwm.ListUncommitted):
-            uncommitted = ["doesnt exist txn1", "not real txn2"] # TODO use a real list
+            uncommitted = list(self._txn_state.keys())
+            uncommitted.append("doesnt.exist.txn.aborting-wont-hurt.-----0-0")
             reply = cwm.ReplyUncommitted(msg2.rtag, uncommitted)
             reply_bytes = cwm.TwoPCFrame.encode(reply)
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
+
+            log = [time.time(), 'list-uncommitted', uncommitted]
+            self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
+            self._txn_log.flush()
         elif isinstance(msg2, cwm.TwoPCPhase1):
-            self._txn_state[msg2.txn_id] = msg2.where_list
-            print('DBG: 2PC Phase 1 got {}'.format(msg2))
-            print('DBG: 2PC Phase 1 txn_state = {}'.format(self._txn_state))
-            # TODO: print state to _txn_log
-            # TODO: fsync
-            # TODO: reply success/fail
-            success = True
+            print('2PC: Phase 1 got {}'.format(msg2))
+            print('2PC: Phase 1 txn_state = {}'.format(self._txn_state))
+
+            for (stream_id, start_por, end_por) in msg2.where_list:
+                if stream_id != 1:
+                    self._txn_commit_next = False
+                    print('2PC: Phase 1 invalid stream_id {} in {}'
+                        .format(stream_id, msg2))
+
+            # TODO: fsync ... Too bad Python doesn't allow us to use fsync
+            # without going around to the 'os' module.  We're going to skip
+            # the fsync for now.
+
+            success = self._txn_commit_next
             reply = cwm.TwoPCReply(str(msg2.txn_id).encode('utf-8'), success)
             reply_bytes = cwm.TwoPCFrame.encode(reply)
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
+
+            if success:
+                self._txn_state[msg2.txn_id] = msg2.where_list
+                log_tag = '1-ok'
+            else:
+                log_tag = '1-rollback'
+            log = [time.time(), log_tag, msg2.txn_id, msg2.where_list]
+            self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
+            self._txn_log.flush()
+
+            self._txn_commit_next = True
         elif isinstance(msg2, cwm.TwoPCReply):
             raise Exception("Bad stream ID 0 message: {}".format(msg2))
         elif isinstance(msg2, cwm.TwoPCPhase2):
-            print('DBG: 2PC Phase2 txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+            print('2PC: Phase2 txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
             if msg2.txn_id in self._txn_state:
-                print('TODO: Do real txn commit/abort stuff for txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
-                # TODO: print state to _txn_log
-                # TODO: truncate & fsync on abort
+                where_list = self._txn_state[msg2.txn_id]
+                if not msg2.commit:
+                    for (stream_id, start_por, end_por) in where_list:
+                        if stream_id != 1:
+                            raise Exception('Phase 2 abort: bad stream_id {}'.
+                                format(stream_id))
+                        print('2PC: truncating {} to offset {}'.format(self._out_path, start_por))
+                        self._out.truncate(start_por)
+                        self._out.flush()
+
+                if msg2.commit:
+                    log_tag = '2-ok'
+                else:
+                    log_tag = '2-rollback'
+                log = [time.time(), log_tag, msg2.txn_id, where_list]
+                self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
+                self._txn_log.flush()
+
                 del self._txn_state[msg2.txn_id]
-                print('DBG: 2PC Phase 2 txn_state = {}'.format(self._txn_state))
+                print('2PC: Phase 2 txn_state = {}'.format(self._txn_state))
             else:
-                print('TODO: Got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+                print('ERROR: Got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
             # No reply is required for Phase 2
         else:
             raise Exception("Stream ID 0 not implemented, msg2 = {}".format(msg2))
 
     def handle_message_streamx(self, msg):
-        self._out.write(bytes(msg.message))
-        self._out.flush()
+        bs = bytes(msg.message)
+        ret1 = self._out.write(bs)
+        ret2 = self._out.flush()
+
+        if (len(bs) != ret1) or (ret2 != None):
+            self._txn_commit_next = False
+            raise Exception("File write error? {} != {} or {} != None".format(len(bs), ret1, ret2))
+
+        for (stream_id, regexp) in self._txn_stream_content:
+            if stream_id == msg.stream_id:
+                if re.search(regexp, str(bs)):
+                    self._txn_commit_next = False
+                    print('2PC: abort next transaction: {} matches {}'
+                        .format(regexp, bs))
+
         self._out_bytes += len(msg.message)
-        # send an ack every 100 messages
         if msg.message_id:
             self._streams[msg.stream_id][2] = msg.message_id
         if msg.flags & cwm.Message.Eos:
@@ -176,7 +236,6 @@ class AsyncServer(asynchat.async_chat, object):
             print("NH: acking eos for {}".format(msg))
             self.write(cwm.Ack(credits = 1,
                                acks= [(msg.stream_id, self._streams[msg.stream_id][2])]))
-        print('DBG: _out_bytes {} message_id {}'.format(self._out_bytes, msg.message_id))
 
     def write(self, msg):
         print("write {}".format(msg))
@@ -184,17 +243,15 @@ class AsyncServer(asynchat.async_chat, object):
         super(AsyncServer, self).push(data)
 
     def updated_received_count(self):
-        if self.received_count % 200 == 0:
-            # but reset point_of_ref back to 0 every 500
-            # ... yes this will cause the sender to run forever.
+        if self.received_count % 10 == 0:
             print("Sending ack for streams!")
             ack = cwm.Ack(
-                credits = 200,
+                credits = 10,
                 acks = [
                     (sid, por) for sid, _, por in self._streams.values()])
             self.write(ack)
-        if self.received_count % 1000 == 0:
-            # send a restart every 1000 messages
+        if self.received_count % 200 == 0:
+            # send a restart every 200 messages
             print('PERIODIC RESTART, what could possibly go wrong?')
             self.write(cwm.Restart())
 
