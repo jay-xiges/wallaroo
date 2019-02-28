@@ -80,7 +80,8 @@ class ConnectorSinkNotify
     _fsm_state = cp.ConnectorProtoFsmHandshake
 
   fun ref closed(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32]("ConnectorSink connection closed\n".cstring())
+    @printf[I32]("ConnectorSink connection closed, unmuting upstreams\n".cstring())
+    try (conn as ConnectorSink ref)._mute_upstreams() else Fail() end
 
   fun ref dispose() =>
     @printf[I32]("ConnectorSink connection dispose\n".cstring())
