@@ -51,6 +51,7 @@ class AsyncServer(asynchat.async_chat, object):
         self._txn_state = {}
         self._txn_commit_next = True
         self._txn_stream_content = []
+        self._txn_local_count = 0
 
         self._abort_rules = parse_abort_rules(self._abort_rule_path)
         print('DBG: abort rules = {}'.format(self._abort_rules))
@@ -155,11 +156,26 @@ class AsyncServer(asynchat.async_chat, object):
             print('2PC: Phase 1 got {}'.format(msg2))
             print('2PC: Phase 1 txn_state = {}'.format(self._txn_state))
 
+            # Sanity checks
             for (stream_id, start_por, end_por) in msg2.where_list:
                 if stream_id != 1:
                     self._txn_commit_next = False
                     print('2PC: Phase 1 invalid stream_id {} in {}'
                         .format(stream_id, msg2))
+
+            # Check local debugging/testing abort rules
+            self._txn_local_count += 1
+            for r in self._abort_rules:
+                if r[0] == 'local-txn':
+                    if self._txn_local_count == r[1]:
+                        self._txn_commit_next = False
+                        print('2PC: abort next transaction: local txn count {}'
+                            .format(self._txn_local_count))
+                elif r[0] == 'txnid-regexp':
+                    if re.search(r[1], msg2.txn_id):
+                        self._txn_commit_next = False
+                        print('2PC: abort next transaction: regexp {} matches txn_id {}'
+                            .format(r[1], msg2.txn_id))
 
             # TODO: fsync ... Too bad Python doesn't allow us to use fsync
             # without going around to the 'os' module.  We're going to skip
@@ -184,7 +200,7 @@ class AsyncServer(asynchat.async_chat, object):
         elif isinstance(msg2, cwm.TwoPCReply):
             raise Exception("Bad stream ID 0 message: {}".format(msg2))
         elif isinstance(msg2, cwm.TwoPCPhase2):
-            print('2PC: Phase2 txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+            print('2PC: Phase 2 got {}'.format(msg2))
             if msg2.txn_id in self._txn_state:
                 where_list = self._txn_state[msg2.txn_id]
                 if not msg2.commit:
@@ -207,7 +223,7 @@ class AsyncServer(asynchat.async_chat, object):
                 del self._txn_state[msg2.txn_id]
                 print('2PC: Phase 2 txn_state = {}'.format(self._txn_state))
             else:
-                print('ERROR: Got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+                print('2PC: ERROR: Phase 2 got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
             # No reply is required for Phase 2
         else:
             raise Exception("Stream ID 0 not implemented, msg2 = {}".format(msg2))

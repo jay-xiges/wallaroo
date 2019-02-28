@@ -148,7 +148,7 @@ actor ConnectorSink is Sink
     barrier_initiator: BarrierInitiator, checkpoint_initiator: CheckpointInitiator,
     host: String, service: String, initial_msgs: Array[Array[ByteSeq] val] val,
     from: String = "", init_size: USize = 64, max_size: USize = 16384,
-    reconnect_pause: U64 = 10_000_000_000)
+    reconnect_pause: U64 = 500_000_000 /* TODO: 10_000_000_000 */)
   =>
     """
     Connect via IPv4 or IPv6. If `from` is a non-empty string, the connection
