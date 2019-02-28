@@ -23,7 +23,6 @@ def parse_abort_rules(path):
     try:
         with open(path, 'rb') as f:
             for l in f:
-                print('DBG: got line: ', l)
                 a.append(eval(l))
         return a
     except FileNotFoundError:
@@ -54,12 +53,10 @@ class AsyncServer(asynchat.async_chat, object):
         self._txn_local_count = 0
 
         self._abort_rules = parse_abort_rules(self._abort_rule_path)
-        print('DBG: abort rules = {}'.format(self._abort_rules))
         for t in self._abort_rules:
             if t[0] == "stream-content":
                 stream_id = t[1]
                 regexp = t[2]
-                print("DBG: STREAM {} REGEXP = {}".format(stream_id, regexp))
                 self._txn_stream_content.append((stream_id, regexp))
 
     def collect_incoming_data(self, data):
@@ -77,30 +74,25 @@ class AsyncServer(asynchat.async_chat, object):
             h = struct.unpack(">I", b"".join(self.in_buffer))[0]
             self.in_buffer = []
             self.set_terminator(h)
-            print('DBG: got header, body size = {}'.format(h))
         else:
             # Read the payload and pass it to _handle_frame
             frame_data = b"".join(self.in_buffer)
             self.in_buffer = []
             self.set_terminator(4) # read next frame header
             self.reading_header = True
-            print('DBG: got bytes = {}'.format(frame_data))
             self._handle_frame(frame_data)
 
     def _handle_frame(self, frame):
-        print('DBG: _handle_frame {}'.format(frame))
         self.received_count += 1
         self.updated_received_count()
         msg = cwm.Frame.decode(frame)
         # Hello, Ok, Error, Notify, NotifyAck, Message, Ack, Restart
         self.count = 0
         if isinstance(msg, cwm.Hello):
-            print('DBG: Hello\n')
             # respond with an ok or an error
             ok = cwm.Ok(200, self._streams.values())
             self.write(ok)
         elif isinstance(msg, cwm.Notify):
-            print('DBG: Notify\n')
             if msg.stream_id != 1:
                 error = cwm.Error("Unsupported stream id {}".format(msg.stream_id))
                 self.write(error)
@@ -119,17 +111,14 @@ class AsyncServer(asynchat.async_chat, object):
                                             por]
             self.write(notify_ack)
         elif isinstance(msg, cwm.Message):
-            print('DBG: Message: {}\n'.format(msg))
             self.handle_message(msg)
         elif isinstance(msg, cwm.Error):
-            print('DBG: Error\n')
             # Got error message from worker
             # close the connection and pass msg to the error handler
             print("Received an error message. closing the connection")
             self.close()
             raise Exception(msg.message)
         else:
-            print('DBG: WTF?\n')
             # write the original message back
             self.write(msg)
 

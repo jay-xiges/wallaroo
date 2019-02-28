@@ -845,8 +845,6 @@ def encode_phase2r(txn_id, commit):
         commit_c = b'\01'
     else:
         commit_c = b'\00'
-    print("DBGDBG: txn_id = {} commit_c = {}".format(txn_id, commit_c))
-    print("DBGDBG: fmt = {}".format(">H{}sc".format(len(txn_id))))
     return struct.pack(">H{}sc".format(len(txn_id)),
                        len(txn_id),
                        txn_id,
