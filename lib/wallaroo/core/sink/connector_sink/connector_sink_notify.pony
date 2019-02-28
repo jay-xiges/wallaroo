@@ -196,6 +196,7 @@ class ConnectorSinkNotify
         _error_and_close(conn, "Bad FSM State: Ea" + _fsm_state().string())
         return
       end
+      @printf[I32]("2PC: GOT MessageMsg\n".cstring())
       try
         let inner = cp.TwoPCFrame.decode(m.message as Array[U8] val)?
         match inner
@@ -233,6 +234,12 @@ class ConnectorSinkNotify
 
           @printf[I32]("2PC: aborted %d stale transactions, unmuting upstreams\n".cstring(), mi.txn_ids.size())
           try (conn as ConnectorSink ref)._unmute_upstreams() else Fail() end
+
+        | let mi: cp.TwoPCReplyMsg =>
+          // TODO: Double-check txn_id for sanity
+          // TODO: If commit, then do stuff
+          // TODO: If not commit, then do other stuff
+          @printf[I32]("2PC: reply for txn_id %s was %s\n".cstring(), mi.txn_id.cstring(), mi.commit.string().cstring())
         else
           Fail()
         end

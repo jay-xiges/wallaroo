@@ -143,6 +143,11 @@ class AsyncServer(asynchat.async_chat, object):
             # TODO: print state to _txn_log
             # TODO: fsync
             # TODO: reply success/fail
+            success = True
+            reply = cwm.TwoPCReply(str(msg2.txn_id).encode('utf-8'), success)
+            reply_bytes = cwm.TwoPCFrame.encode(reply)
+            msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
+            self.write(msg)
         elif isinstance(msg2, cwm.TwoPCReply):
             raise Exception("Bad stream ID 0 message: {}".format(msg2))
         elif isinstance(msg2, cwm.TwoPCPhase2):
