@@ -100,9 +100,6 @@ actor ConnectorSink is Sink
   // duplicate producers in this map (unlike _upstreams) since there might be
   // multiple upstream step ids over a boundary
   let _inputs: Map[RoutingId, Producer] = _inputs.create()
-  // 2PC: We must start with upstreams muted, until both OkMsg and
-  // ReplyUncommittedMsg have been processed.
-  var _mute_outstanding: Bool = true
 
   // Connector
   var _notify: ConnectorSinkNotify
@@ -116,13 +113,12 @@ actor ConnectorSink is Sink
   var _connected: Bool = false
   var _closed: Bool = false
   var _writeable: Bool = false
-  var _throttled: Bool = false
+  // _throttled moved to CollectorSinkNotify
   var _event: AsioEventID = AsioEvent.none()
   embed _pending: List[(ByteSeq, USize)] = _pending.create()
   embed _pending_tracking: List[(USize, SeqId)] = _pending_tracking.create()
   embed _pending_writev: Array[USize] = _pending_writev.create()
   var _pending_writev_total: USize = 0
-  var _muted: Bool = false
   var _expect_read_buf: Reader = Reader
 
   var _shutdown_peer: Bool = false
@@ -175,8 +171,6 @@ actor ConnectorSink is Sink
     _connect_count = 0
     _message_processor = NormalSinkMessageProcessor(this)
     _barrier_acker = BarrierSinkAcker(_sink_id, this, _barrier_initiator)
-    @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
-    _mute_upstreams()
 
   //
   // Application Lifecycle events
@@ -187,8 +181,6 @@ actor ConnectorSink is Sink
     initializer.report_created(this)
 
   be application_created(initializer: LocalTopologyInitializer) =>
-    @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
-    _mute_upstreams()
     initializer.report_initialized(this)
 
   be application_initialized(initializer: LocalTopologyInitializer) =>
@@ -302,8 +294,6 @@ actor ConnectorSink is Sink
     else
       Fail()
     end
-
-    // 2PC: not now: _maybe_mute_or_unmute_upstreams()
 
   be update_router(router: Router) =>
     """
@@ -510,14 +500,6 @@ actor ConnectorSink is Sink
             _writeable = true
             _readable = true
 
-            match _initializer
-            | let initializer: LocalTopologyInitializer =>
-              initializer.report_ready_to_work(this)
-              _initializer = None
-            else
-              Fail()
-            end
-
             _notify.connected(this)
             _pending_reads()
 
@@ -530,7 +512,6 @@ actor ConnectorSink is Sink
                 _release_backpressure()
               end
             end
-            // 2PC: not now: _maybe_mute_or_unmute_upstreams()
           else
             // The connection failed, unsubscribe the event and close.
             @pony_asio_event_unsubscribe(event)
@@ -565,7 +546,6 @@ actor ConnectorSink is Sink
                 //sent all data; release backpressure
                 _release_backpressure()
               end
-              // 2PC: not now: _maybe_mute_or_unmute_upstreams()
             end
           else
             // The connection failed, unsubscribe the event and close.
@@ -610,6 +590,13 @@ actor ConnectorSink is Sink
       end
 
       _try_shutdown()
+    end
+
+  fun ref _report_ready_to_work() =>
+    match _initializer
+    | let initializer: LocalTopologyInitializer =>
+      initializer.report_ready_to_work(this)
+      _initializer = None
     end
 
   fun ref _writev(data: ByteSeqIter, tracking_id: (SeqId | None))
@@ -733,7 +720,7 @@ actor ConnectorSink is Sink
 
   fun ref _pending_reads() =>
     """
-    Unless this connection is currently muted, read while data is available,
+    Read while data is available,
     guessing the next packet length as we go. If we read 4 kb of data, send
     ourself a resume message and stop reading, to avoid starving other actors.
     """
@@ -742,10 +729,6 @@ actor ConnectorSink is Sink
       var received_called: USize = 0
 
       while _readable and not _shutdown_peer do
-        if _muted then
-          return
-        end
-
         // Read as much data as possible.
         let len = @pony_os_recv[USize](
           _event,
@@ -988,52 +971,15 @@ actor ConnectorSink is Sink
     end
 
   fun ref _apply_backpressure() =>
-    if not _throttled then
-      _throttled = true
-      _notify.throttled(this)
-    end
+    _notify.throttled(this)
     _writeable = false
     // this is safe because asio thread isn't currently subscribed
     // for a write event so will not be writing to the readable flag
     @pony_asio_event_set_writeable[None](_event, false)
     @pony_asio_event_resubscribe_write(_event)
-    @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
-    _maybe_mute_or_unmute_upstreams()
 
   fun ref _release_backpressure() =>
-    if _throttled then
-      _throttled = false
-      _notify.unthrottled(this)
-      @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
-      _maybe_mute_or_unmute_upstreams()
-    end
-
-  fun ref _maybe_mute_or_unmute_upstreams() =>
-    if _mute_outstanding then
-      if _can_send() then
-        @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
-        _unmute_upstreams()
-      end
-    else
-      if not _can_send() then
-        @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
-        _mute_upstreams()
-      end
-    end
-
-  fun ref _mute_upstreams() =>
-    @printf[I32]("DBG: _mute_upstreams line %d _upstreams.size() %d\n".cstring(), __loc.line(), _upstreams.size())
-    for u in _upstreams.values() do
-      u.mute(this)
-    end
-    _mute_outstanding = true
-
-  fun ref _unmute_upstreams() =>
-    @printf[I32]("DBG: _unmute_upstreams line %d _upstreams.size() %d\n".cstring(), __loc.line(), _upstreams.size())
-    for u in _upstreams.values() do
-      u.unmute(this)
-    end
-    _mute_outstanding = false
+    _notify.unthrottled(this)
 
   fun _can_send(): Bool =>
     _connected and not _closed and _writeable

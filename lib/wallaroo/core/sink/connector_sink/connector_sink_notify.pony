@@ -16,6 +16,7 @@ Copyright 2019 The Wallaroo Authors.
 
 */
 
+use "backpressure"
 use "buffered"
 use "net"
 use "wallaroo/core/common"
@@ -27,7 +28,8 @@ use "wallaroo_labs/mort"
 class ConnectorSinkNotify
   var _fsm_state: cp.ConnectorProtoFsmState = cp.ConnectorProtoFsmDisconnected
   var _header: Bool = true
-  var _throttled: Bool = true
+  var _connected: Bool = false
+  var _throttled: Bool = false
   let _stream_id: cp.StreamId = 1
   let _sink_id: RoutingId
   let _stream_name: String
@@ -36,6 +38,7 @@ class ConnectorSinkNotify
   var message_id: cp.MessageId = acked_point_of_ref
   // 2PC
   var _rtag: U64 = 77777
+  var _twopc_intro_done: Bool = false
 
   new create(sink_id: RoutingId) =>
     _sink_id = sink_id
@@ -55,7 +58,11 @@ class ConnectorSinkNotify
   fun ref connected(conn: WallarooOutgoingNetworkActor ref) =>
     @printf[I32]("ConnectorSink connected\n".cstring())
     _header = true
+    _connected = true
     _throttled = false
+    _twopc_intro_done = false
+    // Apply runtime throttle until we're done with initial 2PC ballet.
+    throttled(conn)
     conn.expect(4)
 
     // SLF: TODO: configure version string
@@ -86,7 +93,11 @@ class ConnectorSinkNotify
 
   fun ref closed(conn: WallarooOutgoingNetworkActor ref) =>
     @printf[I32]("ConnectorSink connection closed, muting upstreams\n".cstring())
-    try (conn as ConnectorSink ref)._mute_upstreams() else Fail() end
+    _connected = false
+    _throttled = false
+    _twopc_intro_done = false
+    throttled(conn)
+
     // SLF TODO: we have no idea how much stuff that we've sent recently
     // has actually been received by the now-disconnected sink.
     // We need to trigger a rollback so that when we re-connect, we can
@@ -144,13 +155,23 @@ class ConnectorSinkNotify
     data
 
   fun ref throttled(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32]("ConnectorSink is experiencing back pressure\n".cstring())
-    _throttled = true
+    if (not _throttled) or (not _twopc_intro_done) then
+      _throttled = true
+      // SLF TODO: thread through an auth thingie then use Backpressure.apply()
+      @pony_apply_backpressure[None]()
+      @printf[I32](("ConnectorSink is experiencing back pressure, " +
+        "connected = %s\n").cstring(), _connected.string().cstring())
+    end
 
   fun ref unthrottled(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32](("ConnectorSink is no longer experiencing" +
-      " back pressure\n").cstring())
-    _throttled = false
+    if _throttled and _twopc_intro_done then
+      _throttled = false
+      // SLF TODO: thread through an auth thingie then use Backpressure.release()
+      @pony_release_backpressure[None]()
+      @printf[I32](("ConnectorSink is no longer experiencing" +
+        " back pressure, connected = %s\n").cstring(),
+      _connected.string().cstring())
+    end
 
   fun _send_msg(conn: WallarooOutgoingNetworkActor ref, msg: cp.Message) =>
     let w1: Writer = w1.create()
@@ -233,7 +254,14 @@ class ConnectorSinkNotify
 
           // TODO: remove this dev/scaffolding hack
           let txn_id = "bogus-txn-0"
-          let p1 = make_2pc_phase1(txn_id, [(U64(1), U64(0), U64(50))])
+
+          // DEBUG: This 5005 offset is bogus (i.e., too big), so the
+          // connector sink proc will crash.  That means that this sink
+          // will never be able to reconnect its TCP socket, which is
+          // useful for some testing scenarios.
+          // let p1 = make_2pc_phase1(txn_id, [(U64(1), U64(0), U64(5005))])
+          let p1 = make_2pc_phase1(txn_id, [(U64(1), U64(0), U64(0))])
+
           let p1_msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [p1])?
           _send_msg(conn, p1_msg)
           // Silly us, not waiting for phase 1's reply. But this is a hack.
@@ -244,9 +272,18 @@ class ConnectorSinkNotify
           _send_msg(conn, p2_msg)
           // TODO: END OF remove this dev/scaffolding hack
 
-          @printf[I32]("2PC: aborted %d stale transactions, SKIP unmuting upstreams\n".cstring(), mi.txn_ids.size())
-          //SKIP try (conn as ConnectorSink ref)._unmute_upstreams() else Fail() end
+          @printf[I32]("2PC: aborted %d stale transactions\n".cstring(),
+            mi.txn_ids.size())
 
+          // SLF TODO: don't bother with mute & unmute at all
+          // SLF TODO: rip out all the muting & unuting
+          try
+            (conn as ConnectorSink ref)._report_ready_to_work()
+          else
+            Fail()
+          end
+          _twopc_intro_done = true
+          unthrottled(conn)
         | let mi: cp.TwoPCReplyMsg =>
           // TODO: Double-check txn_id for sanity
           // TODO: If commit, then do stuff
