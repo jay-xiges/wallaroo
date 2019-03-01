@@ -210,7 +210,10 @@ class AsyncServer(asynchat.async_chat, object):
                         self._out.truncate(start_por)
                         self._out.flush()
                 if not phase1_status and msg2.commit:
+                    print('2PC: mute/unmute placeholder 1 @ aloc_sink')
                     print('2PC: Protocol error: phase 1 status was rollback but phase 2 says commit')
+                    ##### time.sleep(1.0)
+                    print('2PC: mute/unmute placeholder 2 @ aloc_sink')
                     sys.exit(66)
 
                 if msg2.commit and phase1_status:

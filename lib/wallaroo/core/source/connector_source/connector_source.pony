@@ -751,10 +751,12 @@ actor ConnectorSource[In: Any val] is Source
     end
 
   fun ref _mute_local() =>
+    @printf[I32]("DBG: _mute_local line %d\n".cstring(), __loc.line())
     _muted_by.set(this)
     _mute()
 
   fun ref _unmute_local() =>
+    @printf[I32]("DBG: _unmute_local line %d\n".cstring(), __loc.line())
     _muted_by.unset(this)
 
     if _muted_by.size() == 0 then
@@ -762,10 +764,12 @@ actor ConnectorSource[In: Any val] is Source
     end
 
   be mute(a: Any tag) =>
+    @printf[I32]("DBG: be mute line %d\n".cstring(), __loc.line())
     _muted_by.set(a)
     _mute()
 
   be unmute(a: Any tag) =>
+    @printf[I32]("DBG: be unmute line %d\n".cstring(), __loc.line())
     _muted_by.unset(a)
 
     if _muted_by.size() == 0 then
