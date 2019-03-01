@@ -175,6 +175,7 @@ actor ConnectorSink is Sink
     _connect_count = 0
     _message_processor = NormalSinkMessageProcessor(this)
     _barrier_acker = BarrierSinkAcker(_sink_id, this, _barrier_initiator)
+    @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
     _mute_upstreams()
 
   //
@@ -186,6 +187,7 @@ actor ConnectorSink is Sink
     initializer.report_created(this)
 
   be application_created(initializer: LocalTopologyInitializer) =>
+    @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
     _mute_upstreams()
     initializer.report_initialized(this)
 
@@ -1014,19 +1016,20 @@ actor ConnectorSink is Sink
       end
     else
       if not _can_send() then
+        @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
         _mute_upstreams()
       end
     end
 
   fun ref _mute_upstreams() =>
-    @printf[I32]("DBG: _mute_upstreams line %d\n".cstring(), __loc.line())
+    @printf[I32]("DBG: _mute_upstreams line %d _upstreams.size() %d\n".cstring(), __loc.line(), _upstreams.size())
     for u in _upstreams.values() do
       u.mute(this)
     end
     _mute_outstanding = true
 
   fun ref _unmute_upstreams() =>
-    @printf[I32]("DBG: _unmute_upstreams line %d\n".cstring(), __loc.line())
+    @printf[I32]("DBG: _unmute_upstreams line %d _upstreams.size() %d\n".cstring(), __loc.line(), _upstreams.size())
     for u in _upstreams.values() do
       u.unmute(this)
     end

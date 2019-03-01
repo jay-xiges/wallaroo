@@ -244,8 +244,8 @@ class ConnectorSinkNotify
           _send_msg(conn, p2_msg)
           // TODO: END OF remove this dev/scaffolding hack
 
-          @printf[I32]("2PC: aborted %d stale transactions, unmuting upstreams\n".cstring(), mi.txn_ids.size())
-          try (conn as ConnectorSink ref)._unmute_upstreams() else Fail() end
+          @printf[I32]("2PC: aborted %d stale transactions, SKIP unmuting upstreams\n".cstring(), mi.txn_ids.size())
+          //SKIP try (conn as ConnectorSink ref)._unmute_upstreams() else Fail() end
 
         | let mi: cp.TwoPCReplyMsg =>
           // TODO: Double-check txn_id for sanity
