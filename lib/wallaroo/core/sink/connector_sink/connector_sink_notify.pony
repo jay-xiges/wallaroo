@@ -18,6 +18,7 @@ Copyright 2019 The Wallaroo Authors.
 
 use "buffered"
 use "net"
+use "wallaroo/core/common"
 use "wallaroo/core/network"
 use "wallaroo_labs/bytes"
 use cp = "wallaroo_labs/connector_protocol"
@@ -28,15 +29,19 @@ class ConnectorSinkNotify
   var _header: Bool = true
   var _throttled: Bool = true
   let _stream_id: cp.StreamId = 1
-  // SLF TODO: what is our worker name?
-  // SLF TODO: what is our RouterId?
-  let _stream_name: String = "worker-QQQ-id-QQQ"
+  let _sink_id: RoutingId
+  let _stream_name: String
   var credits: U32 = 0
-  // SLF TODO: How do we get our initial point-of-reference from EventLog?
-  var _point_of_ref: cp.MessageId = 0
-  var _message_id: cp.MessageId = _point_of_ref
+  var acked_point_of_ref: cp.MessageId = 0
+  var message_id: cp.MessageId = acked_point_of_ref
   // 2PC
   var _rtag: U64 = 77777
+
+  new create(sink_id: RoutingId) =>
+    _sink_id = sink_id
+
+    // SLF TODO: what is our worker name?
+    _stream_name = "worker-QQQ-id-" + _sink_id.string()
 
   fun ref accepted(conn: WallarooOutgoingNetworkActor ref) =>
     Unreachable()
@@ -80,8 +85,12 @@ class ConnectorSinkNotify
     _fsm_state = cp.ConnectorProtoFsmHandshake
 
   fun ref closed(conn: WallarooOutgoingNetworkActor ref) =>
-    @printf[I32]("ConnectorSink connection closed, unmuting upstreams\n".cstring())
+    @printf[I32]("ConnectorSink connection closed, muting upstreams\n".cstring())
     try (conn as ConnectorSink ref)._mute_upstreams() else Fail() end
+    // SLF TODO: we have no idea how much stuff that we've sent recently
+    // has actually been received by the now-disconnected sink.
+    // We need to trigger a rollback so that when we re-connect, we can
+    // resend missing data.
 
   fun ref dispose() =>
     @printf[I32]("ConnectorSink connection dispose\n".cstring())
@@ -169,7 +178,7 @@ class ConnectorSinkNotify
         if credits < 2 then
           _error_and_close(conn, "HEY, too few credits: " + credits.string())
         else
-          let notify = cp.NotifyMsg(_stream_id, _stream_name, _message_id)
+          let notify = cp.NotifyMsg(_stream_id, _stream_name, message_id)
           _send_msg(conn, notify)
           credits = credits - 1
         end
@@ -182,12 +191,11 @@ class ConnectorSinkNotify
       _error_and_close(conn, "Bad FSM State: C" + _fsm_state().string())
     | let m: cp.NotifyAckMsg =>
       if _fsm_state is cp.ConnectorProtoFsmStreaming then
-        @printf[I32]("SLF TODO: NotifyAck: success %s stream_id %d p-o-r %llu\n".cstring(), m.success.string().cstring(), m.stream_id, m.point_of_ref)
-        // TODO: Remove this below, assuming that we always know best?
-        if m.point_of_ref > 0 then
-          _point_of_ref = m.point_of_ref
-          _message_id = _point_of_ref
-        end
+        @printf[I32]("NotifyAck: success %s stream_id %d p-o-r %lu\n".cstring(), m.success.string().cstring(), m.stream_id, m.point_of_ref)
+        // We are going to ignore the point of reference sent to us by
+        // the connector sink.  We assume that we know best, and if our
+        // point of reference is earlier, then we'll send some duplicates
+        // and the connector sink can ignore them.
       else
         _error_and_close(conn, "Bad FSM State: D" + _fsm_state().string())
       end
@@ -207,7 +215,8 @@ class ConnectorSinkNotify
           // have already started a new round of 2PC ... so our new
           // round's txn_id may be in the txn_id's list.
           // TODO: Filter out any current txn_id before sending the
-          // txn abort messages.
+          // txn abort messages. ... Hrm, is that still true, since I've
+          // changed the mute sources logic for this sink?
           // TODO: Double-check rtag # for sanity.
           ifdef "trace" then
             @printf[I32]("TRACE: uncommitted txns = %d\n".cstring(),
@@ -227,10 +236,12 @@ class ConnectorSinkNotify
           let p1 = make_2pc_phase1(txn_id, [(U64(1), U64(0), U64(50))])
           let p1_msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [p1])?
           _send_msg(conn, p1_msg)
-          let commit = make_2pc_phase2(txn_id, true)
-          let commit_msg =
-            cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [commit])?
-          _send_msg(conn, commit_msg)
+          // Silly us, not waiting for phase 1's reply. But this is a hack.
+          // And if our sink sends an phase 1 abort, then it should definitely
+          // recognize that this phase 2 message is bogus.
+          let p2 = make_2pc_phase2(txn_id, true)
+          let p2_msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [p2])?
+          _send_msg(conn, p2_msg)
           // TODO: END OF remove this dev/scaffolding hack
 
           @printf[I32]("2PC: aborted %d stale transactions, unmuting upstreams\n".cstring(), mi.txn_ids.size())
@@ -254,11 +265,17 @@ class ConnectorSinkNotify
         credits = credits + m.credits
         for (s_id, p_o_r) in m.credit_list.values() do
           if s_id == _stream_id then
-            _point_of_ref = p_o_r
-            @printf[I32]("SLF TODO: Ack: stream-id %llu new point-of-reference %llu\n".cstring(), _stream_id, _point_of_ref)
+            if p_o_r < acked_point_of_ref then
+              @printf[I32]("Error: Ack: stream-id %lu p_o_r %lu acked_point_of_ref %lu\n".cstring(), _stream_id, p_o_r, acked_point_of_ref)
+              Fail()
+            end
+            acked_point_of_ref = p_o_r
+            @printf[I32]("SLF TODO: Ack: stream-id %lu new point of reference %lu\n".cstring(), _stream_id, acked_point_of_ref)
+          else
+            @printf[I32]("Ack: unknown stream_id %d\n".cstring(), s_id)
+            Fail()
           end
         end
-        // SLF TODO: LEFT OFF HERE, process credit_list
       else
         _error_and_close(conn, "Bad FSM State: F" + _fsm_state().string())
       end
@@ -301,10 +318,11 @@ class ConnectorSinkNotify
     let event_time = None
     let key = None
 
+    let base_message_id = message_id
     for e in encoded1.values() do
-      _message_id = _message_id + e.size().u64()
+      message_id = message_id + e.size().u64()
     end
-    cp.MessageMsg(stream_id, flags, _message_id, event_time, key, encoded1)?
+    cp.MessageMsg(stream_id, flags, base_message_id, event_time, key, encoded1)?
 
   fun _payload_length(data: Array[U8] iso): USize ? =>
     Bytes.to_u32(data(0)?, data(1)?, data(2)?, data(3)?).usize()

@@ -35,7 +35,7 @@ class AsyncServer(asynchat.async_chat, object):
         self._conn = sock
         self._out_path = out_path
         self._out = open(self._out_path, 'wb')
-        self._out_bytes = 0
+        self._out_offset = self._out.tell()
         self._txn_log = open(self._out_path + ".txnlog", 'wb')
         self._abort_rule_path = abort_rule_path
         asynchat.async_chat.__init__(self, sock=self._conn)
@@ -151,6 +151,14 @@ class AsyncServer(asynchat.async_chat, object):
                     self._txn_commit_next = False
                     print('2PC: Phase 1 invalid stream_id {} in {}'
                         .format(stream_id, msg2))
+                if start_por > end_por:
+                    self._txn_commit_next = False
+                    print('2PC: Phase 1 invalid start_por {} end_por {}'
+                        .format(start_por, end_por))
+                if end_por > self._out_offset:
+                    self._txn_commit_next = False
+                    print('2PC: Phase 1 invalid end_por {} file size {}'
+                        .format(end_por, self._out.tell()))
 
             # Check local debugging/testing abort rules
             self._txn_local_count += 1
@@ -176,8 +184,8 @@ class AsyncServer(asynchat.async_chat, object):
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
 
+            self._txn_state[msg2.txn_id] = (success, msg2.where_list)
             if success:
-                self._txn_state[msg2.txn_id] = msg2.where_list
                 log_tag = '1-ok'
             else:
                 log_tag = '1-rollback'
@@ -190,8 +198,9 @@ class AsyncServer(asynchat.async_chat, object):
             raise Exception("Bad stream ID 0 message: {}".format(msg2))
         elif isinstance(msg2, cwm.TwoPCPhase2):
             print('2PC: Phase 2 got {}'.format(msg2))
+            print('2PC: Phase 2 txn_state = {}'.format(self._txn_state))
             if msg2.txn_id in self._txn_state:
-                where_list = self._txn_state[msg2.txn_id]
+                (phase1_status, where_list) = self._txn_state[msg2.txn_id]
                 if not msg2.commit:
                     for (stream_id, start_por, end_por) in where_list:
                         if stream_id != 1:
@@ -200,8 +209,11 @@ class AsyncServer(asynchat.async_chat, object):
                         print('2PC: truncating {} to offset {}'.format(self._out_path, start_por))
                         self._out.truncate(start_por)
                         self._out.flush()
+                if not phase1_status and msg2.commit:
+                    print('2PC: Protocol error: phase 1 status was rollback but phase 2 says commit')
+                    sys.exit(66)
 
-                if msg2.commit:
+                if msg2.commit and phase1_status:
                     log_tag = '2-ok'
                 else:
                     log_tag = '2-rollback'
@@ -233,7 +245,7 @@ class AsyncServer(asynchat.async_chat, object):
                     print('2PC: abort next transaction: {} matches {}'
                         .format(regexp, bs))
 
-        self._out_bytes += len(msg.message)
+        self._out_offset += len(msg.message)
         if msg.message_id:
             self._streams[msg.stream_id][2] = msg.message_id
         if msg.flags & cwm.Message.Eos:

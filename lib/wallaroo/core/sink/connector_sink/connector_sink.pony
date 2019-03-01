@@ -166,7 +166,7 @@ actor ConnectorSink is Sink
     _read_buf = recover Array[U8].>undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
-    _notify = ConnectorSinkNotify
+    _notify = ConnectorSinkNotify(_sink_id)
     _initial_msgs = initial_msgs
     _reconnect_pause = reconnect_pause
     _host = host
@@ -268,7 +268,6 @@ actor ConnectorSink is Sink
       end
       let encoded2 =
         try
-          // SLF TODO: How the hell do we access sequence # & stuff??
           let msg = _notify.make_message(encoded1)?
           let w1: Writer = w1.create()  
           let w2: Writer = w2.create()
@@ -429,6 +428,9 @@ actor ConnectorSink is Sink
     end
 
   be barrier_fully_acked(token: BarrierToken) =>
+    ifdef "checkpoint_trace" then
+      @printf[I32]("Barrier fully acked %s at ConnectorSink %s\n".cstring(), token.string().cstring(), _sink_id.string().cstring())
+    end
     // SLF TODO
     None
 
@@ -445,12 +447,23 @@ actor ConnectorSink is Sink
   ///////////////
   fun ref checkpoint_state(checkpoint_id: CheckpointId) =>
     """
-    ConnectorSinks don't currently write out any data as part of the checkpoint.
+    Serialize hard state (i.e., can't afford to lose it) for this sink.
     """
+    ifdef "checkpoint_trace" then
+      @printf[I32]("Checkpoint state %lu at ConnectorSink %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring())
+    end
+
+    let wb: Writer = wb.create()
+    wb.u64_be(_notify.acked_point_of_ref)
+    let bs = wb.done()
+
     _event_log.checkpoint_state(_sink_id, checkpoint_id,
-      recover val Array[ByteSeq] end)
+      recover val consume bs end)
 
   be prepare_for_rollback() =>
+    ifdef "checkpoint_trace" then
+      @printf[I32]("Prepare for checkpoint rollback at ConnectorSink %s\n".cstring(), _sink_id.string().cstring())
+    end
     _prepare_for_rollback()
 
   fun ref _prepare_for_rollback() =>
@@ -459,9 +472,17 @@ actor ConnectorSink is Sink
   be rollback(payload: ByteSeq val, event_log: EventLog,
     checkpoint_id: CheckpointId)
   =>
-    """
-    There is nothing for a ConnectorSink to rollback to.
-    """
+    ifdef "checkpoint_trace" then
+      @printf[I32]("Rollback to %s at ConnectorSink %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring())
+    end
+
+    let r = Reader
+    r.append(payload)
+    let a = try r.u64_be()? else Fail(); 0 end
+    @printf[I32]("Rollback: acked_point_of_ref %lu at ConnectorSink %s\n".cstring(), a, _sink_id.string().cstring())
+    _notify.acked_point_of_ref = a
+    _notify.message_id = a // SLF TODO: double-check
+
     event_log.ack_rollback(_sink_id)
 
   ///////////////
@@ -495,7 +516,6 @@ actor ConnectorSink is Sink
               Fail()
             end
 
-            @printf[I32]("QQQ: _notify.connected @ line %d\n".cstring(), __loc.line())
             _notify.connected(this)
             _pending_reads()
 
@@ -975,18 +995,21 @@ actor ConnectorSink is Sink
     // for a write event so will not be writing to the readable flag
     @pony_asio_event_set_writeable[None](_event, false)
     @pony_asio_event_resubscribe_write(_event)
+    @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
     _maybe_mute_or_unmute_upstreams()
 
   fun ref _release_backpressure() =>
     if _throttled then
       _throttled = false
       _notify.unthrottled(this)
+      @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
       _maybe_mute_or_unmute_upstreams()
     end
 
   fun ref _maybe_mute_or_unmute_upstreams() =>
     if _mute_outstanding then
       if _can_send() then
+        @printf[I32]("DBG: _maybe_mute_or_unmute_upstreams line %d\n".cstring(), __loc.line())
         _unmute_upstreams()
       end
     else
@@ -996,12 +1019,14 @@ actor ConnectorSink is Sink
     end
 
   fun ref _mute_upstreams() =>
+    @printf[I32]("DBG: _mute_upstreams line %d\n".cstring(), __loc.line())
     for u in _upstreams.values() do
       u.mute(this)
     end
     _mute_outstanding = true
 
   fun ref _unmute_upstreams() =>
+    @printf[I32]("DBG: _unmute_upstreams line %d\n".cstring(), __loc.line())
     for u in _upstreams.values() do
       u.unmute(this)
     end
