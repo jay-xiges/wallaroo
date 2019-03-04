@@ -52,6 +52,11 @@ actor ConnectorSourceListener[In: Any val] is SourceListener
   let _routing_id_gen: RoutingIdGenerator = RoutingIdGenerator
   let _env: Env
   let _worker_name: WorkerName
+
+  // TODO [source-migration] pass _leader_name as a parameter rather than
+  // relying on a default starting value (e.g. "initializer" doesn't work for grow)
+  var _leader_name: WorkerName = "initializer"
+
   let _pipeline_name: String
   let _runner_builder: RunnerBuilder
   let _partitioner_builder: PartitionerBuilder
@@ -85,7 +90,8 @@ actor ConnectorSourceListener[In: Any val] is SourceListener
   let _available_sources: Array[ConnectorSource[In]] = _available_sources.create()
 
   // Active Stream Registry
-  let _active_streams: Map[U64, (String,Any tag,U64,U64)] =
+  // (stream_name, connector_source, last_acked_por, last_seen_por)
+  let _active_streams: Map[U64, (String, Any tag, U64, U64)] =
     _active_streams.create()
 
   new create(env: Env, worker_name: WorkerName, pipeline_name: String,
@@ -144,11 +150,13 @@ actor ConnectorSourceListener[In: Any val] is SourceListener
       + host + ":" + service + "\n").cstring())
 
     for i in Range(0, _limit) do
+      // TODO [source-migration]: use deterministic unique source ids
+      // see john's slack message
       let source_id = _routing_id_gen()
       let notify = ConnectorSourceNotify[In](source_id, _pipeline_name,
         _env, _auth, _handler, _runner_builder, _partitioner_builder, _router,
         _metrics_reporter.clone(), _event_log, _target_router, _cookie,
-        _max_credits, _refill_credits)
+        _max_credits, _refill_credits, _host, _service)
       let source = ConnectorSource[In](source_id, _auth, this,
         consume notify, _event_log, _router,
         _outgoing_boundary_builders, _layout_initializer,
@@ -357,6 +365,33 @@ actor ConnectorSourceListener[In: Any val] is SourceListener
     connector_source.get_all_streams_result(session_tag, consume data)
 
   be stream_notify(session_tag: USize,
+    stream_id: U64, stream_name: String, point_of_reference: U64,
+    connector_source: ConnectorSource[In] tag)
+  =>
+    if _leader_name == _worker_name then
+      // This listener is the leader, so refer to local registry
+      _stream_notify(session_tag, stream_id, stream_name, point_of_reference,
+       connector_source)
+    else
+      // This listener is not the leader, and we need to use control channel
+      // to reach the leader registry
+      // TODO [source-migration][integration]: Call out to leader via control channel
+      None
+    end
+
+  be stream_notify_result(session_tag: USize,
+    success: Bool, stream_id: U64, point_of_reference: U64,
+    connector_source: ConnectorSource[In] tag)
+  =>
+    // pass the response along directly to the connector source
+    // point_of_reference doubles as last_message_id here because the stream
+    // had previously been inactive if it's coming from the leader registry
+    connector_source.stream_notify_result(session_tag, success,
+            stream_id, point_of_reference, point_of_reference)
+
+  // TODO [source-migration]: Update this for Jonathan's new registry and source
+  // map data types
+  fun _stream_notify(session_tag: USize,
     stream_id: U64, stream_name: String, point_of_reference: U64,
     connector_source: ConnectorSource[In] tag)
   =>

@@ -128,9 +128,6 @@ actor ConnectorSource[In: Any val] is Source
   // Checkpoint
   var _next_checkpoint_id: CheckpointId = 1
 
-  // Active Stream Registry
-  let _active_stream_registry: ConnectorSourceListener[In]
-
   new create(source_id: RoutingId, auth: AmbientAuth,
     listen: ConnectorSourceListener[In], notify: ConnectorSourceNotify[In] iso,
     event_log: EventLog, router': Router,
@@ -149,7 +146,6 @@ actor ConnectorSource[In: Any val] is Source
     _notify = consume notify
     _layout_initializer = layout_initializer
     _router_registry = router_registry
-    _active_stream_registry = listen
 
     for (target_worker_name, builder) in outgoing_boundary_builders.pairs() do
       if not _outgoing_boundaries.contains(target_worker_name) then
@@ -163,7 +159,7 @@ actor ConnectorSource[In: Any val] is Source
 
     _router = router'
     _update_router(router')
-    _notify.set_active_stream_registry(_active_stream_registry, this)
+    _notify.set_stream_registry(_listen, this)
 
     _notify.update_boundaries(_outgoing_boundaries)
 
