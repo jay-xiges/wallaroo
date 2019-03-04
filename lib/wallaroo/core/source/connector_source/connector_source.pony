@@ -188,7 +188,7 @@ actor ConnectorSource[In: Any val] is Source
     In case we pop into existence midway through a checkpoint, we need to
     wait until this is called to start processing.
     """
-    // DELME? _unmute_local()
+    _unmute_local()
     _is_pending = false
     for (id, c) in _outputs.pairs() do
       Route.register_producer(_source_id, id, this, c)
