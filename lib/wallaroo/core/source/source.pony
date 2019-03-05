@@ -75,6 +75,7 @@ trait tag Source is (Producer & DisposableActor & BoundaryUpdatable &
 
 trait tag SourceListener is (DisposableActor & BoundaryUpdatable)
   be start_listening()
+  be start_sources()
   be recovery_protocol_complete()
   be update_router(router: StatePartitionRouter)
   be add_boundary_builders(
