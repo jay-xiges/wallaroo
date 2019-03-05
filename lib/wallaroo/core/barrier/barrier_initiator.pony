@@ -176,7 +176,7 @@ actor BarrierInitiator is Initializable
       _initialize_source(s)
     end
 
-  fun _initialize_source(s: Source) =>
+  fun ref _initialize_source(s: Source) =>
     _phase = _SourcePendingBarrierInitiatorPhase(this)
     let promise = Promise[Source]
     promise.next[None](recover this~source_registration_complete() end)
