@@ -155,6 +155,7 @@ actor ConnectorSink is Sink
     Connect via IPv4 or IPv6. If `from` is a non-empty string, the connection
     will be made from the specified interface.
     """
+    @printf[I32]("ConnectorSink: this = 0x%lx\n".cstring(), this)
     _env = env
     _sink_id = sink_id
     _name = sink_name
@@ -375,6 +376,7 @@ actor ConnectorSink is Sink
     match barrier_token
     | let srt: CheckpointRollbackBarrierToken =>
       try
+        @printf[I32]("@@@@@@@ acker use @ line %d\n".cstring(), __loc.line())
         let b_acker = _barrier_acker as BarrierSinkAcker
         if b_acker.higher_priority(srt) then
           _prepare_for_rollback()
@@ -385,12 +387,21 @@ actor ConnectorSink is Sink
     end
 
     if _message_processor.barrier_in_progress() then
+      @printf[I32]("@@@@@@@ _message_processor use @ line %d\n".cstring(), __loc.line())
+//qqq left off here ... what do we do?  queue all of the barriers and
+//respond to them after 2PC??
+      // If we call receive_barrier here, then the ActiveBarriers processor
+      // will declare the barrier finished before we ever do anything.
       _message_processor.receive_barrier(input_id, producer,
         barrier_token)
     else
+      // TODO: We assume that there will always be at least one
+      // NormalSinkMessageProcessor message that will trigger
+      // this 'else' message at least once per checkpoint!
       match _message_processor
       | let nsmp: NormalSinkMessageProcessor =>
         try
+        @printf[I32]("@@@@@@@ acker use @ line %d\n".cstring(), __loc.line())
            _message_processor = BarrierSinkMessageProcessor(this,
              _barrier_acker as BarrierSinkAcker)
            _message_processor.receive_new_barrier(input_id, producer,
@@ -434,6 +445,7 @@ actor ConnectorSink is Sink
 
   fun ref _clear_barriers() =>
     try
+        @printf[I32]("@@@@@@@ acker use @ line %d\n".cstring(), __loc.line())
       (_barrier_acker as BarrierSinkAcker).clear()
     else
       Fail()

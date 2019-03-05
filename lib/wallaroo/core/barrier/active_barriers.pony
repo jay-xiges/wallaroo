@@ -74,6 +74,7 @@ class ActiveBarriers
     _barriers(barrier_token) = handler
 
   fun ref ack_barrier(s: Sink, barrier_token: BarrierToken) =>
+    @printf[I32]("active_barriers.pony: ack_barrier: sink = 0x%lx\n".cstring(), s)
     try
       _barriers(barrier_token)?.ack_barrier(s)
     else
@@ -85,6 +86,7 @@ class ActiveBarriers
 
   fun ref abort_barrier(s: Sink, barrier_token: BarrierToken) =>
     try
+       @printf[I32]("active_barriers.pony: abort_barrier: sink = 0x%lx\n".cstring(), s)
       _barriers(barrier_token)?.abort_barrier(s)
     else
       ifdef debug then
