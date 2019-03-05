@@ -19,7 +19,7 @@ Copyright 2017 The Wallaroo Authors.
 use "collections"
 use "wallaroo_labs/mort"
 use "wallaroo_labs/options"
-use "wallaroo/ent/spike"
+use "wallaroo/core/spike"
 
 class StartupOptions
   var m_arg: (Array[String] | None) = None
