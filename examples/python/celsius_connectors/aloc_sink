@@ -89,8 +89,10 @@ class AsyncServer(asynchat.async_chat, object):
         # Hello, Ok, Error, Notify, NotifyAck, Message, Ack, Restart
         self.count = 0
         if isinstance(msg, cwm.Hello):
-            # respond with an ok or an error
-            ok = cwm.Ok(200, self._streams.values())
+            # As of 2019-03-04, Wallaroo's connector sink is not managing
+            # credits and will rely solely on TCP backpressure for its
+            # own backpressure signalling.
+            ok = cwm.Ok(500, self._streams.values())
             self.write(ok)
         elif isinstance(msg, cwm.Notify):
             if msg.stream_id != 1:
@@ -263,7 +265,7 @@ class AsyncServer(asynchat.async_chat, object):
         super(AsyncServer, self).push(data)
 
     def updated_received_count(self):
-        if self.received_count % 10 == 0:
+        if self.received_count % 100 == 0:
             print("Sending ack for streams!")
             ack = cwm.Ack(
                 credits = 10,

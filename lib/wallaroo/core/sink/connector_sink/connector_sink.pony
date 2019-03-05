@@ -138,6 +138,11 @@ actor ConnectorSink is Sink
 
   var _seq_id: SeqId = 0
 
+  // 2PC
+  var _twopc_state: cp.TwoPCFsmState = cp.TwoPCFsmStart
+  var _twopc_txn_id: String = ""
+  var _twopc_checkpoint_id: CheckpointId = 0
+
   new create(sink_id: RoutingId, sink_name: String, event_log: EventLog,
     recovering: Bool, env: Env, encoder_wrapper: ConnectorEncoderWrapper,
     metrics_reporter: MetricsReporter iso,
@@ -213,6 +218,11 @@ actor ConnectorSink is Sink
     msg_uid: MsgId, frac_ids: FractionalMessageId, i_seq_id: SeqId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
+    if not (_twopc_state is cp.TwoPCFsmStart) then
+      @printf[I32]("ERROR: _twopc_state = %d\n", _twopc_state())
+      Fail()
+    end
+
     var receive_ts: U64 = 0
     ifdef "detailed-metrics" then
       receive_ts = Time.nanos()
@@ -224,10 +234,8 @@ actor ConnectorSink is Sink
       @printf[I32]("Rcvd msg at ConnectorSink\n".cstring())
     end
     try
-      // SLF TODO: Put credit check in make_message() or elsewhere?
       if _notify.credits == 0 then
-        @printf[I32]("BUMMER: OUT OF CREDITS!\n".cstring())
-        // SLF TODO: queue and/or backpressure instead of halting here.
+        // TODO: add token management back to connector sink protocol?
         // Ideas?
         // 1. We can't simply use _apply_backpressure because the socket
         //    probably is writeable, which would mean ASIO would immediately
@@ -249,7 +257,7 @@ actor ConnectorSink is Sink
         //        the 3rd element is the # of credits that correspond?
         //        * Tricksy, because a single credit of message may be more
         //          than one writev array item!
-        // SLF LEFT OFF HERE
+        None
       else
         _notify.credits = _notify.credits - 1
       end
@@ -278,8 +286,6 @@ actor ConnectorSink is Sink
       let next_seq_id = (_seq_id = _seq_id + 1)
       _writev(encoded2, next_seq_id)
 
-      // TODO: Should happen when tracking info comes back from writev as
-      // being done.
       let end_ts = Time.nanos()
       let time_spent = end_ts - worker_ingress_ts
 
@@ -438,11 +444,83 @@ actor ConnectorSink is Sink
   // CHECKPOINTS
   ///////////////
   fun ref checkpoint_state(checkpoint_id: CheckpointId) =>
+    if not (_twopc_state is cp.TwoPCFsmStart) then
+      @printf[I32]("ERROR: _twopc_state = %d\n", _twopc_state())
+      Fail()
+    end
+
+    // TODO: If no data has been processed by the sink since the last
+    // checkpoint, then don't bother with 2PC: skip directly to
+    // local state checkpoint to event log
+
+    let txn_id = _notify.stream_name + ":c_id=" + checkpoint_id.string()
+    let where_list: cp.WhereList = [(1, 0, 0)] // TODO fix dummy args
+    let b = cp.TwoPCEncode.phase1(txn_id, where_list)
+    try
+      let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
+       _notify.send_msg(this, msg)
+     else
+      Fail()
+    end
+
+    ifdef "checkpoint_trace" then
+      @printf[I32]("2PC: Checkpoint state %s at ConnectorSink %s, txn-id %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring(), txn_id.cstring())
+    end
+
+    let wb: Writer = wb.create()
+    // TODO: formalize this & doc it up
+    wb.u8(65) // ASCII A
+    wb.u16_be(txn_id.size().u16())
+    wb.write(txn_id)
+    let bs = recover trn wb.done() end
+    _event_log.checkpoint_state(_sink_id, checkpoint_id,
+      consume bs where is_last_entry = false)
+
+    _twopc_state = cp.TwoPCFsm1Precommit
+    _twopc_txn_id = txn_id
+    _twopc_checkpoint_id = checkpoint_id
+
+  fun ref twopc_reply(txn_id: String, commit: Bool) =>
+    if not (_twopc_state is cp.TwoPCFsm1Precommit) then
+      @printf[I32]("ERROR: twopc_reply: _twopc_state = %d\n", _twopc_state())
+      Fail()
+    end
+    if txn_id != _twopc_txn_id then
+      @printf[I32]("ERROR: twopc_reply: txn_id %s != %s\n",
+        txn_id.cstring(), _twopc_txn_id.cstring())
+      Fail()
+    end
+    if commit then
+      @printf[I32]("2PC: txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
+
+/****
+      let wb: Writer = wb.create()
+      // TODO: formalize this & doc it up
+      wb.u8(66) // ASCII B
+      wb.u8(if commit then 1 else 0 end)
+      wb.u16_be(txn_id.size().u16())
+      wb.write(txn_id)
+      let bs = recover trn wb.done() end
+      _event_log.checkpoint_state(_sink_id, _twopc_checkpoint_id,
+        consume bs where is_last_entry = false)
+****/
+      _checkpoint_state(_twopc_checkpoint_id)
+
+      _twopc_state = cp.TwoPCFsmStart
+      _twopc_txn_id = ""
+      _twopc_checkpoint_id = 0
+    else
+      @printf[I32]("ERROR: twopc_reply: txn_id %s != %s\n",
+        txn_id.cstring(), _twopc_txn_id.cstring())
+      Fail()
+    end
+
+  fun ref _checkpoint_state(checkpoint_id: CheckpointId) =>
     """
     Serialize hard state (i.e., can't afford to lose it) for this sink.
     """
     ifdef "checkpoint_trace" then
-      @printf[I32]("Checkpoint state %lu at ConnectorSink %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring())
+      @printf[I32]("Checkpoint state %s at ConnectorSink %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring())
     end
 
     let wb: Writer = wb.create()
@@ -450,7 +528,7 @@ actor ConnectorSink is Sink
     let bs = wb.done()
 
     _event_log.checkpoint_state(_sink_id, checkpoint_id,
-      recover val consume bs end)
+      consume bs)
 
   be prepare_for_rollback() =>
     ifdef "checkpoint_trace" then
@@ -473,7 +551,7 @@ actor ConnectorSink is Sink
     let a = try r.u64_be()? else Fail(); 0 end
     @printf[I32]("Rollback: acked_point_of_ref %lu at ConnectorSink %s\n".cstring(), a, _sink_id.string().cstring())
     _notify.acked_point_of_ref = a
-    _notify.message_id = a // SLF TODO: double-check
+    _notify.message_id = a // SLF TODO: double-check but this feels quite wrong
 
     event_log.ack_rollback(_sink_id)
 
@@ -537,7 +615,6 @@ actor ConnectorSink is Sink
             _shutdown = false
             _shutdown_peer = false
 
-            @printf[I32]("QQQ: _notify.connected @ line %d\n".cstring(), __loc.line())
             _notify.connected(this)
             _pending_reads()
 
@@ -796,7 +873,6 @@ actor ConnectorSink is Sink
     writeable. On an error, dispose of the connection. Returns whether
     it sent all pending data or not.
     """
-    // TODO: Make writev_batch_size user configurable
     let writev_batch_size: USize = @pony_os_writev_max[I32]().usize()
     var num_to_send: USize = 0
     var bytes_to_send: USize = 0
@@ -834,7 +910,6 @@ actor ConnectorSink is Sink
         // Write as much data as possible.
         var len = @pony_os_writev[USize](_event,
           _pending_writev.cpointer(), num_to_send) ?
-        @printf[I32]("QQQ ConnectorSink: pony_os_writev wrote %d\n".cstring(), len)
 
         // keep track of how many bytes we sent
         bytes_sent = bytes_sent + len
