@@ -141,7 +141,7 @@ actor ConnectorSink is Sink
   // 2PC
   var _twopc_state: cp.TwoPCFsmState = cp.TwoPCFsmStart
   var _twopc_txn_id: String = ""
-  var _twopc_checkpoint_id: CheckpointId = 0
+  var _twopc_barrier_token: CheckpointBarrierToken = CheckpointBarrierToken(0)
 
   new create(sink_id: RoutingId, sink_name: String, event_log: EventLog,
     recovering: Bool, env: Env, encoder_wrapper: ConnectorEncoderWrapper,
@@ -478,7 +478,7 @@ actor ConnectorSink is Sink
 
     _twopc_state = cp.TwoPCFsm1Precommit
     _twopc_txn_id = txn_id
-    _twopc_checkpoint_id = checkpoint_id
+    _twopc_barrier_token = CheckpointBarrierToken(checkpoint_id)
 
   fun ref twopc_reply(txn_id: String, commit: Bool) =>
     if not (_twopc_state is cp.TwoPCFsm1Precommit) then
@@ -493,7 +493,7 @@ actor ConnectorSink is Sink
     if commit then
       @printf[I32]("2PC: txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
 
-      _checkpoint_state(_twopc_checkpoint_id)
+      _checkpoint_state(_twopc_barrier_token.id)
 
     else
       @printf[I32]("ERROR: twopc_reply: txn_id %s phase 1 ABORT\n".cstring(),
@@ -506,15 +506,14 @@ actor ConnectorSink is Sink
       wb.u16_be(txn_id.size().u16())
       wb.write(txn_id)
       let bs = recover trn wb.done() end
-      _event_log.checkpoint_state(_sink_id, _twopc_checkpoint_id,
+      _event_log.checkpoint_state(_sink_id, _twopc_barrier_token.id,
         consume bs)
 
-      // qqq left off here ... need to tell ?? to abort!
-      Fail()
+      _barrier_initiator.abort_barrier(this, _twopc_barrier_token)
     end
     _twopc_state = cp.TwoPCFsmStart
     _twopc_txn_id = ""
-    _twopc_checkpoint_id = 0
+    _twopc_barrier_token = CheckpointBarrierToken(0)
 
   fun ref _checkpoint_state(checkpoint_id: CheckpointId) =>
     """
