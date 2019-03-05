@@ -221,10 +221,13 @@ actor ConnectorSink is Sink
     msg_uid: MsgId, frac_ids: FractionalMessageId, i_seq_id: SeqId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
+    /**** TODO: Figure out why this failure sometimes happens and if it's bad.
+                2PC: ERROR: _twopc_state = 1
     if not (_twopc_state is cp.TwoPCFsmStart) then
       @printf[I32]("2PC: ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
+    ****/
 
     var receive_ts: U64 = 0
     ifdef "detailed-metrics" then
@@ -582,6 +585,19 @@ actor ConnectorSink is Sink
 
   fun ref _prepare_for_rollback() =>
     _clear_barriers()
+
+  be incremental_rollback(payload: ByteSeq val, event_log: EventLog,
+    checkpoint_id: CheckpointId)
+  =>
+    ifdef "checkpoint_trace" then
+      @printf[I32]("Incremental rollback to %s at ConnectorSink %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring())
+    end
+
+    // TODO: If we need to reset any state contained in an
+    // incremental checkpoint payload, now is the time.
+    // At the moment, I think, there's nothing to do.
+
+    // Only call event_log.ack_rollback() for final rollback payload
 
   be rollback(payload: ByteSeq val, event_log: EventLog,
     checkpoint_id: CheckpointId)

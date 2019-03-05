@@ -273,6 +273,13 @@ actor CheckpointInitiator is Initializable
         for w in _workers.values() do
           ws.push(w)
         end
+        if checkpoint_id <= 1 then
+          Fail()
+        else
+          // TODO: This isn't right, what if we have two aborted checkpoints
+          // in a row?
+          r.update_checkpoint_id(checkpoint_id - 1)
+        end
         r.start_recovery(consume ws where with_reconnect = false)
       else
         Fail()
