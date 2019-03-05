@@ -219,7 +219,7 @@ actor ConnectorSink is Sink
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
     if not (_twopc_state is cp.TwoPCFsmStart) then
-      @printf[I32]("ERROR: _twopc_state = %d\n", _twopc_state())
+      @printf[I32]("ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
 
@@ -445,7 +445,7 @@ actor ConnectorSink is Sink
   ///////////////
   fun ref checkpoint_state(checkpoint_id: CheckpointId) =>
     if not (_twopc_state is cp.TwoPCFsmStart) then
-      @printf[I32]("ERROR: _twopc_state = %d\n", _twopc_state())
+      @printf[I32]("ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
 
@@ -482,38 +482,39 @@ actor ConnectorSink is Sink
 
   fun ref twopc_reply(txn_id: String, commit: Bool) =>
     if not (_twopc_state is cp.TwoPCFsm1Precommit) then
-      @printf[I32]("ERROR: twopc_reply: _twopc_state = %d\n", _twopc_state())
+      @printf[I32]("ERROR: twopc_reply: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
     if txn_id != _twopc_txn_id then
-      @printf[I32]("ERROR: twopc_reply: txn_id %s != %s\n",
+      @printf[I32]("ERROR: twopc_reply: txn_id %s != %s\n".cstring(),
         txn_id.cstring(), _twopc_txn_id.cstring())
       Fail()
     end
     if commit then
       @printf[I32]("2PC: txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
 
-/****
+      _checkpoint_state(_twopc_checkpoint_id)
+
+    else
+      @printf[I32]("ERROR: twopc_reply: txn_id %s phase 1 ABORT\n".cstring(),
+        txn_id.cstring())
+
       let wb: Writer = wb.create()
       // TODO: formalize this & doc it up
       wb.u8(66) // ASCII B
-      wb.u8(if commit then 1 else 0 end)
+      wb.write("BBB txn aborted by phase 1")
       wb.u16_be(txn_id.size().u16())
       wb.write(txn_id)
       let bs = recover trn wb.done() end
       _event_log.checkpoint_state(_sink_id, _twopc_checkpoint_id,
-        consume bs where is_last_entry = false)
-****/
-      _checkpoint_state(_twopc_checkpoint_id)
+        consume bs)
 
-      _twopc_state = cp.TwoPCFsmStart
-      _twopc_txn_id = ""
-      _twopc_checkpoint_id = 0
-    else
-      @printf[I32]("ERROR: twopc_reply: txn_id %s != %s\n",
-        txn_id.cstring(), _twopc_txn_id.cstring())
+      // qqq left off here ... need to tell ?? to abort!
       Fail()
     end
+    _twopc_state = cp.TwoPCFsmStart
+    _twopc_txn_id = ""
+    _twopc_checkpoint_id = 0
 
   fun ref _checkpoint_state(checkpoint_id: CheckpointId) =>
     """
