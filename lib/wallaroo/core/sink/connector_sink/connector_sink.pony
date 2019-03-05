@@ -142,6 +142,8 @@ actor ConnectorSink is Sink
   var _twopc_state: cp.TwoPCFsmState = cp.TwoPCFsmStart
   var _twopc_txn_id: String = ""
   var _twopc_barrier_token: CheckpointBarrierToken = CheckpointBarrierToken(0)
+  var _twopc_barrier_queue: Array[(RoutingId, Producer, BarrierToken)] =
+    _twopc_barrier_queue.create()
 
   new create(sink_id: RoutingId, sink_name: String, event_log: EventLog,
     recovering: Bool, env: Env, encoder_wrapper: ConnectorEncoderWrapper,
@@ -220,7 +222,7 @@ actor ConnectorSink is Sink
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
     if not (_twopc_state is cp.TwoPCFsmStart) then
-      @printf[I32]("ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
+      @printf[I32]("2PC: ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
 
@@ -384,24 +386,59 @@ actor ConnectorSink is Sink
       else
         Fail()
       end
+    | let sbt: CheckpointBarrierToken =>
+      if not ((_twopc_state is cp.TwoPCFsmStart) or
+              (_twopc_state is cp.TwoPCFsm1Precommit)) then
+        @printf[I32]("2PC: ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
+        Fail()
+      end
+
+      if _twopc_state is cp.TwoPCFsmStart then
+        // TODO: If no data has been processed by the sink since the last
+        // checkpoint, then don't bother with 2PC: skip directly to
+        // local state checkpoint to event log
+
+        let checkpoint_id = sbt.id
+        let txn_id = _notify.stream_name + ":c_id=" + checkpoint_id.string()
+        let where_list: cp.WhereList = [(1, 0, 0)] // TODO fix dummy args
+        let b = cp.TwoPCEncode.phase1(txn_id, where_list)
+        try
+          let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
+           _notify.send_msg(this, msg)
+         else
+          Fail()
+        end
+        @printf[I32]("2PC: sent phase 1 for txn_id %s\n".cstring(), txn_id.cstring())
+
+        _twopc_state = cp.TwoPCFsm1Precommit
+        _twopc_txn_id = txn_id
+        _twopc_barrier_token = CheckpointBarrierToken(checkpoint_id)
+      end
+      if _message_processor.barrier_in_progress() then
+        // TODO: Safe to assume that there will always be at least *two*
+        // CheckpointBarrierTokens for each checkpoint, one to trigger
+        // the 'else' clause below and one for this clause.
+        _twopc_barrier_queue.push((input_id, producer, barrier_token))
+      else
+        try
+          _message_processor = BarrierSinkMessageProcessor(this,
+            _barrier_acker as BarrierSinkAcker)
+          _message_processor.receive_new_barrier(input_id, producer,
+            barrier_token)
+        else
+          Fail()
+        end
+      end
+      return
     end
 
     if _message_processor.barrier_in_progress() then
-      @printf[I32]("@@@@@@@ _message_processor use @ line %d\n".cstring(), __loc.line())
-//qqq left off here ... what do we do?  queue all of the barriers and
-//respond to them after 2PC??
-      // If we call receive_barrier here, then the ActiveBarriers processor
-      // will declare the barrier finished before we ever do anything.
       _message_processor.receive_barrier(input_id, producer,
         barrier_token)
     else
-      // TODO: We assume that there will always be at least one
-      // NormalSinkMessageProcessor message that will trigger
-      // this 'else' message at least once per checkpoint!
       match _message_processor
       | let nsmp: NormalSinkMessageProcessor =>
         try
-        @printf[I32]("@@@@@@@ acker use @ line %d\n".cstring(), __loc.line())
            _message_processor = BarrierSinkMessageProcessor(this,
              _barrier_acker as BarrierSinkAcker)
            _message_processor.receive_new_barrier(input_id, producer,
@@ -456,61 +493,55 @@ actor ConnectorSink is Sink
   // CHECKPOINTS
   ///////////////
   fun ref checkpoint_state(checkpoint_id: CheckpointId) =>
-    if not (_twopc_state is cp.TwoPCFsmStart) then
-      @printf[I32]("ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
-      Fail()
-    end
-
-    // TODO: If no data has been processed by the sink since the last
-    // checkpoint, then don't bother with 2PC: skip directly to
-    // local state checkpoint to event log
-
-    let txn_id = _notify.stream_name + ":c_id=" + checkpoint_id.string()
-    let where_list: cp.WhereList = [(1, 0, 0)] // TODO fix dummy args
-    let b = cp.TwoPCEncode.phase1(txn_id, where_list)
-    try
-      let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
-       _notify.send_msg(this, msg)
-     else
+    if not (_twopc_state is cp.TwoPCFsm2Commit) then
+      @printf[I32]("2PC: ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
 
     ifdef "checkpoint_trace" then
-      @printf[I32]("2PC: Checkpoint state %s at ConnectorSink %s, txn-id %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring(), txn_id.cstring())
+      @printf[I32]("2PC: Checkpoint state %s at ConnectorSink %s, txn-id %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring(), _twopc_txn_id.cstring())
     end
 
     let wb: Writer = wb.create()
     // TODO: formalize this & doc it up
     wb.u8(65) // ASCII A
-    wb.u16_be(txn_id.size().u16())
-    wb.write(txn_id)
+    wb.u16_be(_twopc_txn_id.size().u16())
+    wb.write(_twopc_txn_id)
     let bs = recover trn wb.done() end
     _event_log.checkpoint_state(_sink_id, checkpoint_id,
       consume bs where is_last_entry = false)
 
-    _twopc_state = cp.TwoPCFsm1Precommit
-    _twopc_txn_id = txn_id
-    _twopc_barrier_token = CheckpointBarrierToken(checkpoint_id)
-
   fun ref twopc_reply(txn_id: String, commit: Bool) =>
     if not (_twopc_state is cp.TwoPCFsm1Precommit) then
-      @printf[I32]("ERROR: twopc_reply: _twopc_state = %d\n".cstring(), _twopc_state())
+      @printf[I32]("2PC: ERROR: twopc_reply: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
     if txn_id != _twopc_txn_id then
-      @printf[I32]("ERROR: twopc_reply: txn_id %s != %s\n".cstring(),
+      @printf[I32]("2PC: ERROR: twopc_reply: txn_id %s != %s\n".cstring(),
         txn_id.cstring(), _twopc_txn_id.cstring())
       Fail()
     end
     if commit then
+      _twopc_state = cp.TwoPCFsm2Commit
       @printf[I32]("2PC: txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
 
+      for (input_id, producer, barrier_token) in _twopc_barrier_queue.values() do
+      @printf[I32]("2PC: A txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
+        _message_processor.receive_new_barrier(input_id, producer,
+          barrier_token)
+      end
+      @printf[I32]("2PC: B txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
       _checkpoint_state(_twopc_barrier_token.id)
+      @printf[I32]("2PC: C txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
+
+      // TODO: send phase 2 commit message
 
     else
-      @printf[I32]("ERROR: twopc_reply: txn_id %s phase 1 ABORT\n".cstring(),
+      _twopc_state = cp.TwoPCFsm2Abort
+      @printf[I32]("2PC: twopc_reply: txn_id %s phase 1 ABORT\n".cstring(),
         txn_id.cstring())
 
+/**** Does commenting this checkpoint make a difference in recovery.pony line 202 failure? ... No ****/
       let wb: Writer = wb.create()
       // TODO: formalize this & doc it up
       wb.u8(66) // ASCII B
@@ -526,6 +557,7 @@ actor ConnectorSink is Sink
     _twopc_state = cp.TwoPCFsmStart
     _twopc_txn_id = ""
     _twopc_barrier_token = CheckpointBarrierToken(0)
+    _twopc_barrier_queue.clear()
 
   fun ref _checkpoint_state(checkpoint_id: CheckpointId) =>
     """
