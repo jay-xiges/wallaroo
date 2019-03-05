@@ -246,6 +246,7 @@ class GlobalConnectorStreamRegistry
 
 
 class LocalConnectorStreamRegistry[In: Any val]
+  // (stream_name, connector_source, last_acked_por, last_seen_por)
   let _active_streams: Map[U64, (String, Any tag, U64, U64)] =
     _active_streams.create()
 
