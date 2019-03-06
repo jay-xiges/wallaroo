@@ -144,6 +144,7 @@ actor ConnectorSink is Sink
   var _twopc_barrier_token: CheckpointBarrierToken = CheckpointBarrierToken(0)
   var _twopc_barrier_queue: Array[(RoutingId, Producer, BarrierToken)] =
     _twopc_barrier_queue.create()
+  var _twopc_phase1_commit: Bool = false
 
   new create(sink_id: RoutingId, sink_name: String, event_log: EventLog,
     recovering: Bool, env: Env, encoder_wrapper: ConnectorEncoderWrapper,
@@ -532,9 +533,7 @@ actor ConnectorSink is Sink
       @printf[I32]("2PC: txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
 
       for (input_id, producer, barrier_token) in _twopc_barrier_queue.values() do
-      @printf[I32]("2PC: A txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
-        _message_processor.receive_barrier(input_id, producer,
-          barrier_token)
+        _message_processor.receive_barrier(input_id, producer, barrier_token)
       end
       @printf[I32]("2PC: B txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
       _checkpoint_state(_twopc_barrier_token.id)
@@ -857,6 +856,13 @@ actor ConnectorSink is Sink
 
     @pony_os_socket_close[None](_fd)
     _fd = -1
+
+    // 2PC
+    _twopc_state = cp.TwoPCFsmStart
+    _twopc_txn_id = ""
+    _twopc_barrier_token = CheckpointBarrierToken(0)
+    _twopc_barrier_queue.clear()
+    _twopc_phase1_commit = false
 
     _notify.closed(this)
 
