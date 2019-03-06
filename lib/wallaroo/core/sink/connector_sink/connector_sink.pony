@@ -533,7 +533,7 @@ actor ConnectorSink is Sink
 
       for (input_id, producer, barrier_token) in _twopc_barrier_queue.values() do
       @printf[I32]("2PC: A txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
-        _message_processor.receive_new_barrier(input_id, producer,
+        _message_processor.receive_barrier(input_id, producer,
           barrier_token)
       end
       @printf[I32]("2PC: B txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())

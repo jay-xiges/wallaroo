@@ -290,6 +290,7 @@ class ConnectorSinkNotify
             // We need to trigger a rollback so that when we re-connect, we can
             // resend missing data.  That trigger's location is after the
             // re-connect and after ListUncommitted's reply.
+            None
           end
           _twopc_intro_done = true
           unthrottled(conn)
