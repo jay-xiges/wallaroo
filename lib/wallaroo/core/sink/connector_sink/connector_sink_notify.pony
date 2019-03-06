@@ -36,6 +36,7 @@ class ConnectorSinkNotify
   var credits: U32 = 0
   var acked_point_of_ref: cp.MessageId = 0
   var message_id: cp.MessageId = acked_point_of_ref
+  var _connection_count: USize = 0
   // 2PC
   var _rtag: U64 = 77777
   var _twopc_intro_done: Bool = false
@@ -61,6 +62,7 @@ class ConnectorSinkNotify
     _connected = true
     _throttled = false
     _twopc_intro_done = false
+    _connection_count = _connection_count + 1
     // Apply runtime throttle until we're done with initial 2PC ballet.
     throttled(conn)
     conn.expect(4)
@@ -99,10 +101,12 @@ class ConnectorSinkNotify
     _twopc_intro_done = false
     throttled(conn)
 
-    // SLF TODO: we have no idea how much stuff that we've sent recently
+    // We have no idea how much stuff that we've sent recently
     // has actually been received by the now-disconnected sink.
     // We need to trigger a rollback so that when we re-connect, we can
-    // resend missing data.
+    // resend missing data.  That trigger's location is after the
+    // re-connect and after ListUncommitted's reply.
+    // TODO: maybe, do stuff here??
 
   fun ref dispose() =>
     @printf[I32]("ConnectorSink connection dispose\n".cstring())
@@ -120,7 +124,6 @@ class ConnectorSinkNotify
       try
         let payload_size: USize = _payload_length(consume data)?
 
-        @printf[I32]("QQQ: ConnectorSink got header\n".cstring())
         conn.expect(payload_size)
         _header = false
       else
@@ -131,7 +134,6 @@ class ConnectorSinkNotify
       conn.expect(4)
       _header = true
       let data' = recover val consume data end
-      @printf[I32]("QQQ: ConnectorSink got body: %s\n".cstring(), _print_array[U8](data').cstring())
       try
         _process_connector_sink_v2_data(conn, data')?
       else
@@ -273,10 +275,21 @@ class ConnectorSinkNotify
 ****/
           @printf[I32]("2PC: aborted %d stale transactions\n".cstring(),
             mi.txn_ids.size())
-          try
-            (conn as ConnectorSink ref)._report_ready_to_work()
+
+          if _connection_count == 1 then
+            try
+              (conn as ConnectorSink ref)._report_ready_to_work()
+            else
+              Fail()
+            end
           else
-            Fail()
+            // We have no idea how much stuff that we had sent during
+            // the last connection has actually been received by the
+            // sink.
+            // TODO: maybe, do stuff here??
+            // We need to trigger a rollback so that when we re-connect, we can
+            // resend missing data.  That trigger's location is after the
+            // re-connect and after ListUncommitted's reply.
           end
           _twopc_intro_done = true
           unthrottled(conn)

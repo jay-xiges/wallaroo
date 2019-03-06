@@ -396,6 +396,9 @@ actor ConnectorSink is Sink
         Fail()
       end
 
+      // TODO left off here: if we aren't connected and done the initial
+      // 2PC abort dance, then we cannot start a round of 2PC here & now!
+
       if _twopc_state is cp.TwoPCFsmStart then
         // TODO: If no data has been processed by the sink since the last
         // checkpoint, then don't bother with 2PC: skip directly to
@@ -537,14 +540,13 @@ actor ConnectorSink is Sink
       _checkpoint_state(_twopc_barrier_token.id)
       @printf[I32]("2PC: C txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
 
-      // TODO: send phase 2 commit message
+      // TODO: send phase 2 commit message ... at the appropriate time
 
     else
       _twopc_state = cp.TwoPCFsm2Abort
       @printf[I32]("2PC: twopc_reply: txn_id %s phase 1 ABORT\n".cstring(),
         txn_id.cstring())
 
-/**** Does commenting this checkpoint make a difference in recovery.pony line 202 failure? ... No ****/
       let wb: Writer = wb.create()
       // TODO: formalize this & doc it up
       wb.u8(66) // ASCII B
@@ -556,6 +558,9 @@ actor ConnectorSink is Sink
         consume bs)
 
       _barrier_initiator.abort_barrier(this, _twopc_barrier_token)
+
+      // TODO: send phase 2 commit message ... at the appropriate time
+
     end
     _twopc_state = cp.TwoPCFsmStart
     _twopc_txn_id = ""
