@@ -299,7 +299,8 @@ class ConnectorSinkNotify
           // TODO: If commit, then do stuff
           // TODO: If not commit, then do other stuff
           @printf[I32]("2PC: reply for txn_id %s was %s\n".cstring(), mi.txn_id.cstring(), mi.commit.string().cstring())
-          try (conn as ConnectorSink ref).twopc_reply(mi.txn_id, mi.commit)
+          try (conn as ConnectorSink ref).twopc_phase1_reply(
+            mi.txn_id, mi.commit)
           else Fail() end
         else
           Fail()

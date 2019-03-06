@@ -142,8 +142,6 @@ actor ConnectorSink is Sink
   var _twopc_state: cp.TwoPCFsmState = cp.TwoPCFsmStart
   var _twopc_txn_id: String = ""
   var _twopc_barrier_token: CheckpointBarrierToken = CheckpointBarrierToken(0)
-  var _twopc_barrier_queue: Array[(RoutingId, Producer, BarrierToken)] =
-    _twopc_barrier_queue.create()
   var _twopc_phase1_commit: Bool = false
 
   new create(sink_id: RoutingId, sink_name: String, event_log: EventLog,
@@ -178,6 +176,7 @@ actor ConnectorSink is Sink
     _service = service
     _from = from
     _connect_count = 0
+    @printf[I32]("WWWW: 0 _message_processor = NormalSinkMessageProcessor\n".cstring())
     _message_processor = NormalSinkMessageProcessor(this)
     _barrier_acker = BarrierSinkAcker(_sink_id, this, _barrier_initiator)
 
@@ -222,13 +221,10 @@ actor ConnectorSink is Sink
     msg_uid: MsgId, frac_ids: FractionalMessageId, i_seq_id: SeqId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
-    /**** TODO: Figure out why this failure sometimes happens and if it's bad.
-                2PC: ERROR: _twopc_state = 1
     if not (_twopc_state is cp.TwoPCFsmStart) then
       @printf[I32]("2PC: ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
-    ****/
 
     var receive_ts: U64 = 0
     ifdef "detailed-metrics" then
@@ -397,6 +393,53 @@ actor ConnectorSink is Sink
         Fail()
       end
 
+      if _message_processor.barrier_in_progress() then
+        _message_processor.receive_barrier(input_id, producer, barrier_token
+          , false)
+          ////where ack_barrier_if_complete = false)
+      else
+        try
+          @printf[I32]("WWWW: 1 _message_processor = BarrierSinkMessageProcessor\n".cstring())
+          _message_processor = BarrierSinkMessageProcessor(this,
+            _barrier_acker as BarrierSinkAcker)
+          _message_processor.receive_new_barrier(input_id, producer,
+            barrier_token)
+        else
+          Fail()
+        end
+      end
+      return
+    end
+
+    if _message_processor.barrier_in_progress() then
+      _message_processor.receive_barrier(input_id, producer,
+        barrier_token)
+    else
+      match _message_processor
+      | let nsmp: NormalSinkMessageProcessor =>
+        try
+          @printf[I32]("WWWW: 2 _message_processor = BarrierSinkMessageProcessor\n".cstring())
+           _message_processor = BarrierSinkMessageProcessor(this,
+             _barrier_acker as BarrierSinkAcker)
+           _message_processor.receive_new_barrier(input_id, producer,
+             barrier_token)
+        else
+          Fail()
+        end
+      else
+        Fail()
+      end
+    end
+
+  fun ref barrier_complete(barrier_token: BarrierToken) =>
+    ifdef "checkpoint_trace" then
+      @printf[I32]("Barrier %s complete at ConnectorSink %s\n".cstring(), barrier_token.string().cstring(), _sink_id.string().cstring())
+    end
+    ifdef debug then
+      Invariant(_message_processor.barrier_in_progress())
+    end
+    match barrier_token
+    | let sbt: CheckpointBarrierToken =>
       // TODO left off here: if we aren't connected and done the initial
       // 2PC abort dance, then we cannot start a round of 2PC here & now!
 
@@ -419,64 +462,9 @@ actor ConnectorSink is Sink
 
         _twopc_state = cp.TwoPCFsm1Precommit
         _twopc_txn_id = txn_id
-        _twopc_barrier_token = CheckpointBarrierToken(checkpoint_id)
-      end
-      if _message_processor.barrier_in_progress() then
-        // TODO: Safe to assume that there will always be at least *two*
-        // CheckpointBarrierTokens for each checkpoint, one to trigger
-        // the 'else' clause below and one for this clause.
-        _twopc_barrier_queue.push((input_id, producer, barrier_token))
-      else
-        try
-          _message_processor = BarrierSinkMessageProcessor(this,
-            _barrier_acker as BarrierSinkAcker)
-          _message_processor.receive_new_barrier(input_id, producer,
-            barrier_token)
-        else
-          Fail()
-        end
-      end
-      return
-    end
-
-    if _message_processor.barrier_in_progress() then
-      _message_processor.receive_barrier(input_id, producer,
-        barrier_token)
-    else
-      match _message_processor
-      | let nsmp: NormalSinkMessageProcessor =>
-        try
-           _message_processor = BarrierSinkMessageProcessor(this,
-             _barrier_acker as BarrierSinkAcker)
-           _message_processor.receive_new_barrier(input_id, producer,
-             barrier_token)
-        else
-          Fail()
-        end
+        _twopc_barrier_token = sbt
       else
         Fail()
-      end
-    end
-
-  fun ref barrier_complete(barrier_token: BarrierToken) =>
-    ifdef "checkpoint_trace" then
-      @printf[I32]("Barrier %s complete at ConnectorSink %s\n".cstring(), barrier_token.string().cstring(), _sink_id.string().cstring())
-    end
-    ifdef debug then
-      Invariant(_message_processor.barrier_in_progress())
-    end
-    match barrier_token
-    | let sbt: CheckpointBarrierToken =>
-      checkpoint_state(sbt.id)
-    end
-    let queued = _message_processor.queued()
-    _message_processor = NormalSinkMessageProcessor(this)
-    for q in queued.values() do
-      match q
-      | let qm: QueuedMessage =>
-        qm.process_message(this)
-      | let qb: QueuedBarrier =>
-        qb.inject_barrier(this)
       end
     end
 
@@ -486,6 +474,22 @@ actor ConnectorSink is Sink
     end
     // SLF TODO
     None
+    match token
+    | let sbt: CheckpointBarrierToken =>
+      checkpoint_state(sbt.id)
+
+      let queued = _message_processor.queued()
+      @printf[I32]("WWWW: 1 _message_processor = NormalSinkMessageProcessor\n".cstring())
+      _message_processor = NormalSinkMessageProcessor(this)
+      for q in queued.values() do
+        match q
+        | let qm: QueuedMessage =>
+          qm.process_message(this)
+        | let qb: QueuedBarrier =>
+          qb.inject_barrier(this)
+        end
+      end
+    end
 
   fun ref _clear_barriers() =>
     try
@@ -494,6 +498,7 @@ actor ConnectorSink is Sink
     else
       Fail()
     end
+    @printf[I32]("WWWW: 2 _message_processor = NormalSinkMessageProcessor\n".cstring())
     _message_processor = NormalSinkMessageProcessor(this)
 
   ///////////////
@@ -509,16 +514,13 @@ actor ConnectorSink is Sink
       @printf[I32]("2PC: Checkpoint state %s at ConnectorSink %s, txn-id %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring(), _twopc_txn_id.cstring())
     end
 
-    let wb: Writer = wb.create()
-    // TODO: formalize this & doc it up
-    wb.u8(65) // ASCII A
-    wb.u16_be(_twopc_txn_id.size().u16())
-    wb.write(_twopc_txn_id)
-    let bs = recover trn wb.done() end
-    _event_log.checkpoint_state(_sink_id, checkpoint_id,
-      consume bs where is_last_entry = false)
+    _write_checkpoint_state(checkpoint_id)
 
-  fun ref twopc_reply(txn_id: String, commit: Bool) =>
+    _twopc_state = cp.TwoPCFsmStart
+    _twopc_txn_id = ""
+    _twopc_barrier_token = CheckpointBarrierToken(0)
+
+  fun ref twopc_phase1_reply(txn_id: String, commit: Bool) =>
     if not (_twopc_state is cp.TwoPCFsm1Precommit) then
       @printf[I32]("2PC: ERROR: twopc_reply: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
@@ -528,45 +530,34 @@ actor ConnectorSink is Sink
         txn_id.cstring(), _twopc_txn_id.cstring())
       Fail()
     end
+
+    let wb: Writer = wb.create()
+    // TODO: formalize this & doc it up
+    wb.u8(49) // ASCII 1
+    wb.u8(if commit then 1 else 0 end)
+    wb.u16_be(_twopc_txn_id.size().u16())
+    wb.write(_twopc_txn_id)
+    let bs = recover trn wb.done() end
+    _event_log.checkpoint_state(_sink_id, _twopc_barrier_token.id,
+      consume bs where is_last_entry = false)
+
     if commit then
       _twopc_state = cp.TwoPCFsm2Commit
       @printf[I32]("2PC: txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
 
-      for (input_id, producer, barrier_token) in _twopc_barrier_queue.values() do
-        _message_processor.receive_barrier(input_id, producer, barrier_token)
-      end
-      @printf[I32]("2PC: B txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
-      _checkpoint_state(_twopc_barrier_token.id)
-      @printf[I32]("2PC: C txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
-
-      // TODO: send phase 2 commit message ... at the appropriate time
-
+      _barrier_initiator.ack_barrier(this, _twopc_barrier_token)
     else
       _twopc_state = cp.TwoPCFsm2Abort
       @printf[I32]("2PC: twopc_reply: txn_id %s phase 1 ABORT\n".cstring(),
         txn_id.cstring())
-
-      let wb: Writer = wb.create()
-      // TODO: formalize this & doc it up
-      wb.u8(66) // ASCII B
-      wb.write("BBB txn aborted by phase 1")
-      wb.u16_be(txn_id.size().u16())
-      wb.write(txn_id)
-      let bs = recover trn wb.done() end
-      _event_log.checkpoint_state(_sink_id, _twopc_barrier_token.id,
-        consume bs)
 
       _barrier_initiator.abort_barrier(this, _twopc_barrier_token)
 
       // TODO: send phase 2 commit message ... at the appropriate time
 
     end
-    _twopc_state = cp.TwoPCFsmStart
-    _twopc_txn_id = ""
-    _twopc_barrier_token = CheckpointBarrierToken(0)
-    _twopc_barrier_queue.clear()
 
-  fun ref _checkpoint_state(checkpoint_id: CheckpointId) =>
+  fun ref _write_checkpoint_state(checkpoint_id: CheckpointId) =>
     """
     Serialize hard state (i.e., can't afford to lose it) for this sink.
     """
@@ -589,6 +580,9 @@ actor ConnectorSink is Sink
 
   fun ref _prepare_for_rollback() =>
     _clear_barriers()
+    _twopc_state = cp.TwoPCFsmStart
+    _twopc_txn_id = ""
+    _twopc_barrier_token = CheckpointBarrierToken(0)
 
   be incremental_rollback(payload: ByteSeq val, event_log: EventLog,
     checkpoint_id: CheckpointId)
@@ -861,7 +855,6 @@ actor ConnectorSink is Sink
     _twopc_state = cp.TwoPCFsmStart
     _twopc_txn_id = ""
     _twopc_barrier_token = CheckpointBarrierToken(0)
-    _twopc_barrier_queue.clear()
     _twopc_phase1_commit = false
 
     _notify.closed(this)

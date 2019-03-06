@@ -39,7 +39,7 @@ trait SinkMessageProcessor
     Fail()
 
   fun ref receive_barrier(step_id: RoutingId, producer: Producer,
-    barrier_token: BarrierToken)
+    barrier_token: BarrierToken, ack_barrier_if_complete: Bool = true)
   =>
     Fail()
 
@@ -113,12 +113,13 @@ class BarrierSinkMessageProcessor is SinkMessageProcessor
     _barrier_acker.receive_new_barrier(input_id, producer, barrier_token)
 
   fun ref receive_barrier(input_id: RoutingId, producer: Producer,
-    barrier_token: BarrierToken)
+    barrier_token: BarrierToken, ack_barrier_if_complete: Bool = true)
   =>
     if _barrier_acker.input_blocking(input_id) then
       _queued.push(QueuedBarrier(input_id, producer, barrier_token))
     else
-      _barrier_acker.receive_barrier(input_id, producer, barrier_token)
+      _barrier_acker.receive_barrier(input_id, producer, barrier_token,
+        ack_barrier_if_complete)
     end
 
   fun ref queued(): Array[_Queued] =>
