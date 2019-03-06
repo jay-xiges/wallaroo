@@ -93,6 +93,7 @@ class BarrierSinkMessageProcessor is SinkMessageProcessor
     msg_uid: MsgId, frac_ids: FractionalMessageId, i_seq_id: SeqId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
+    @printf[I32]("SSS: _barrier_acker.input_blocking = %s\n".cstring(), _barrier_acker.input_blocking(i_producer_id).string().cstring())
     if _barrier_acker.input_blocking(i_producer_id) then
       let msg = TypedQueuedMessage[D](metric_name, pipeline_time_spent,
         data, key, event_ts, watermark_ts, i_producer_id, i_producer, msg_uid,

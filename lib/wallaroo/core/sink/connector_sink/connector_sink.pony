@@ -221,6 +221,10 @@ actor ConnectorSink is Sink
     msg_uid: MsgId, frac_ids: FractionalMessageId, i_seq_id: SeqId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
+    ifdef "trace" then
+      @printf[I32]("Rcvd msg at ConnectorSink\n".cstring())
+    end
+
     if not (_twopc_state is cp.TwoPCFsmStart) then
       @printf[I32]("2PC: ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
@@ -233,9 +237,6 @@ actor ConnectorSink is Sink
         9998, latest_ts, receive_ts)
     end
 
-    ifdef "trace" then
-      @printf[I32]("Rcvd msg at ConnectorSink\n".cstring())
-    end
     try
       if _notify.credits == 0 then
         // TODO: add token management back to connector sink protocol?
@@ -478,16 +479,22 @@ actor ConnectorSink is Sink
     | let sbt: CheckpointBarrierToken =>
       checkpoint_state(sbt.id)
 
-      let queued = _message_processor.queued()
       @printf[I32]("WWWW: 1 _message_processor = NormalSinkMessageProcessor\n".cstring())
-      _message_processor = NormalSinkMessageProcessor(this)
-      for q in queued.values() do
-        match q
-        | let qm: QueuedMessage =>
-          qm.process_message(this)
-        | let qb: QueuedBarrier =>
-          qb.inject_barrier(this)
-        end
+      _resume_processing_messages()
+    | let rbrt: CheckpointRollbackResumeBarrierToken =>
+      @printf[I32]("WWWW: 7 _message_processor = NormalSinkMessageProcessor\n".cstring())
+      _resume_processing_messages()
+    end
+
+  fun ref _resume_processing_messages() =>
+    let queued = _message_processor.queued()
+    _message_processor = NormalSinkMessageProcessor(this)
+    for q in queued.values() do
+      match q
+      | let qm: QueuedMessage =>
+        qm.process_message(this)
+      | let qb: QueuedBarrier =>
+        qb.inject_barrier(this)
       end
     end
 
