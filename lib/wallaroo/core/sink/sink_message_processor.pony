@@ -82,10 +82,14 @@ class BarrierSinkMessageProcessor is SinkMessageProcessor
   let sink: Sink ref
   let _barrier_acker: BarrierSinkAcker
   let _queued: Array[_Queued] = _queued.create()
+  let _always_queue: Bool
 
-  new create(s: Sink ref, barrier_acker: BarrierSinkAcker) =>
+  new create(s: Sink ref, barrier_acker: BarrierSinkAcker,
+    always_queue: Bool = false)
+  =>
     sink = s
     _barrier_acker = barrier_acker
+    _always_queue = always_queue
 
   fun ref process_message[D: Any val](metric_name: String,
     pipeline_time_spent: U64, data: D, key: Key, event_ts: U64,
@@ -93,8 +97,7 @@ class BarrierSinkMessageProcessor is SinkMessageProcessor
     msg_uid: MsgId, frac_ids: FractionalMessageId, i_seq_id: SeqId,
     latest_ts: U64, metrics_id: U16, worker_ingress_ts: U64)
   =>
-    @printf[I32]("SSS: _barrier_acker.input_blocking = %s\n".cstring(), _barrier_acker.input_blocking(i_producer_id).string().cstring())
-    if _barrier_acker.input_blocking(i_producer_id) then
+    if _always_queue or _barrier_acker.input_blocking(i_producer_id) then
       let msg = TypedQueuedMessage[D](metric_name, pipeline_time_spent,
         data, key, event_ts, watermark_ts, i_producer_id, i_producer, msg_uid,
         frac_ids, i_seq_id, latest_ts, metrics_id, worker_ingress_ts)

@@ -401,8 +401,12 @@ actor ConnectorSink is Sink
       else
         try
           @printf[I32]("WWWW: 1 _message_processor = BarrierSinkMessageProcessor\n".cstring())
+          // We don't want any messages to be processed by this sink
+          // until we know that system-wide 2PC can commit, hence
+          // always_queue = true
           _message_processor = BarrierSinkMessageProcessor(this,
-            _barrier_acker as BarrierSinkAcker)
+            _barrier_acker as BarrierSinkAcker
+            where always_queue = true)
           _message_processor.receive_new_barrier(input_id, producer,
             barrier_token)
         else
@@ -412,6 +416,7 @@ actor ConnectorSink is Sink
       return
     end
 
+    @printf[I32]("SSSS: _message_processor.barrier_in_progress() = %s\n".cstring(), _message_processor.barrier_in_progress().string().cstring())
     if _message_processor.barrier_in_progress() then
       _message_processor.receive_barrier(input_id, producer,
         barrier_token)
@@ -464,6 +469,17 @@ actor ConnectorSink is Sink
         _twopc_state = cp.TwoPCFsm1Precommit
         _twopc_txn_id = txn_id
         _twopc_barrier_token = sbt
+      else
+        Fail()
+      end
+    | let rbt: CheckpointRollbackBarrierToken =>
+      // The next barrier that we get should be a 
+      // CheckpointRollbackResumeBarrierToken.  We need a
+      // new processor for that.
+      @printf[I32]("WWWW: 3 _message_processor = BarrierSinkMessageProcessor\n".cstring())
+      try
+         _message_processor = BarrierSinkMessageProcessor(this,
+           _barrier_acker as BarrierSinkAcker)
       else
         Fail()
       end
