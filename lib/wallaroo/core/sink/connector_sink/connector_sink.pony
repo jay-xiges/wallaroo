@@ -472,17 +472,6 @@ actor ConnectorSink is Sink
       else
         Fail()
       end
-    | let rbt: CheckpointRollbackBarrierToken =>
-      // The next barrier that we get should be a 
-      // CheckpointRollbackResumeBarrierToken.  We need a
-      // new processor for that.
-      @printf[I32]("WWWW: 3 _message_processor = BarrierSinkMessageProcessor\n".cstring())
-      try
-         _message_processor = BarrierSinkMessageProcessor(this,
-           _barrier_acker as BarrierSinkAcker)
-      else
-        Fail()
-      end
     end
 
   be barrier_fully_acked(token: BarrierToken) =>
@@ -496,6 +485,9 @@ actor ConnectorSink is Sink
       checkpoint_state(sbt.id)
 
       @printf[I32]("WWWW: 1 _message_processor = NormalSinkMessageProcessor\n".cstring())
+      _resume_processing_messages()
+    | let rbrt: CheckpointRollbackBarrierToken =>
+      @printf[I32]("WWWW: 6 _message_processor = NormalSinkMessageProcessor\n".cstring())
       _resume_processing_messages()
     | let rbrt: CheckpointRollbackResumeBarrierToken =>
       @printf[I32]("WWWW: 7 _message_processor = NormalSinkMessageProcessor\n".cstring())

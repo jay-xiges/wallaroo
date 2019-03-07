@@ -34,9 +34,9 @@ class AsyncServer(asynchat.async_chat, object):
         self._id = handler_id
         self._conn = sock
         self._out_path = out_path
-        self._out = open(self._out_path, 'wb')
+        self._out = open(self._out_path, 'ab')
         self._out_offset = self._out.tell()
-        self._txn_log = open(self._out_path + ".txnlog", 'wb')
+        self._txn_log = open(self._out_path + ".txnlog", 'ab')
         self._abort_rule_path = abort_rule_path
         asynchat.async_chat.__init__(self, sock=self._conn)
         self.in_buffer = []
@@ -230,6 +230,9 @@ class AsyncServer(asynchat.async_chat, object):
                 print('2PC: Phase 2 txn_state = {}'.format(self._txn_state))
             else:
                 print('2PC: ERROR: Phase 2 got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
+                log = [time.time(), '2-error', msg2.txn_id, msg2.commit]
+                self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
+                self._txn_log.flush()
             # No reply is required for Phase 2
         else:
             raise Exception("Stream ID 0 not implemented, msg2 = {}".format(msg2))
@@ -287,6 +290,9 @@ class AsyncServer(asynchat.async_chat, object):
             "\n\t".join("{}, {}: {}".format(sid, sn, mid)
                       for sid, sn, mid in self._streams.values())))
         super(AsyncServer, self).close()
+        log = [time.time(), 'connection-closed', True]
+        self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
+        self._txn_log.flush()
 
 
 class EchoServer(asyncore.dispatcher):
