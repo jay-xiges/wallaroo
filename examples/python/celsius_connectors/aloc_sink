@@ -211,6 +211,7 @@ class AsyncServer(asynchat.async_chat, object):
                         print('2PC: truncating {} to offset {}'.format(self._out_path, start_por))
                         self._out.truncate(start_por)
                         self._out.flush()
+                        self._out_offset = start_por
                 if not phase1_status and msg2.commit:
                     print('2PC: mute/unmute placeholder 1 @ aloc_sink')
                     print('2PC: Protocol error: phase 1 status was rollback but phase 2 says commit')
@@ -255,10 +256,13 @@ class AsyncServer(asynchat.async_chat, object):
                     print('2PC: abort next transaction: {} matches {}'
                         .format(regexp, bs))
 
+        if msg.message_id:
+            if self._out_offset != msg.message_id:
+                print('ERROR: self._out_offset {} != msg.message_id {}'.format(self._out_offset, msg.message_id))
+                sys.exit(66)
+            self._streams[msg.stream_id][2] = msg.message_id
         self._out_offset += len(msg.message)
         print('DBG: _out_offset is now {}'.format(self._out_offset))
-        if msg.message_id:
-            self._streams[msg.stream_id][2] = msg.message_id
         if msg.flags & cwm.Message.Eos:
             # ack eos
             print("NH: acking eos for {}".format(msg))
