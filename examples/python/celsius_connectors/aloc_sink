@@ -220,9 +220,11 @@ class AsyncServer(asynchat.async_chat, object):
 
                 if msg2.commit and phase1_status:
                     log_tag = '2-ok'
+                    offset = where_list[0][2]
                 else:
                     log_tag = '2-rollback'
-                log = [time.time(), log_tag, msg2.txn_id, where_list]
+                    offset = where_list[0][1]
+                log = [time.time(), log_tag, msg2.txn_id, offset]
                 self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
                 self._txn_log.flush()
 
@@ -254,6 +256,7 @@ class AsyncServer(asynchat.async_chat, object):
                         .format(regexp, bs))
 
         self._out_offset += len(msg.message)
+        print('DBG: _out_offset is now {}'.format(self._out_offset))
         if msg.message_id:
             self._streams[msg.stream_id][2] = msg.message_id
         if msg.flags & cwm.Message.Eos:

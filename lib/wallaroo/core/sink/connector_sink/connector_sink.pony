@@ -143,6 +143,8 @@ actor ConnectorSink is Sink
   var _twopc_txn_id: String = ""
   var _twopc_barrier_token: CheckpointBarrierToken = CheckpointBarrierToken(0)
   var _twopc_phase1_commit: Bool = false
+  var _twopc_last_offset: USize = 0
+  var _twopc_current_offset: USize = 0
 
   new create(sink_id: RoutingId, sink_name: String, event_log: EventLog,
     recovering: Bool, env: Env, encoder_wrapper: ConnectorEncoderWrapper,
@@ -266,12 +268,13 @@ actor ConnectorSink is Sink
         _notify.credits = _notify.credits - 1
       end
       let encoded1 = _encoder.encode[D](data, _wb)?
-      try
-        @printf[I32]("Rcvd msg at ConnectorSink, 1 size = %d\n".cstring(), encoded1(0)?.size())
-        @printf[I32]("Rcvd msg at ConnectorSink, 1 = %s\n".cstring(), _print_array[U8](encoded1(0)?).cstring())
-      else
-        @printf[I32]("Rcvd msg at ConnectorSink, 1 fallback size = %d\n".cstring(), encoded1.size())
+      var encoded1_len: USize = 0
+      for x in encoded1.values() do
+        encoded1_len = encoded1_len + x.size()
       end
+      // We do not include MessageMsg size overhead in our offset accounting
+      _twopc_current_offset = _twopc_current_offset + encoded1_len
+
       let encoded2 =
         try
           let msg = _notify.make_message(encoded1)?
@@ -530,7 +533,8 @@ actor ConnectorSink is Sink
 
         let checkpoint_id = sbt.id
         let txn_id = _notify.stream_name + ":c_id=" + checkpoint_id.string()
-        let where_list: cp.WhereList = [(1, 0, 0)] // TODO fix dummy args
+        let where_list: cp.WhereList =
+          [(1, _twopc_last_offset.u64(), _twopc_current_offset.u64())]
         let b = cp.TwoPCEncode.phase1(txn_id, where_list)
         try
           let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
@@ -570,6 +574,7 @@ actor ConnectorSink is Sink
 
       checkpoint_state(sbt.id)
       _send_phase2(this, _twopc_txn_id, true)
+      _twopc_last_offset = _twopc_current_offset
       _reset_2pc_state()
 
       @printf[I32]("WWWW: 1 _message_processor = NormalSinkMessageProcessor\n".cstring())
@@ -634,6 +639,7 @@ actor ConnectorSink is Sink
     end
 
     let wb: Writer = wb.create()
+    wb.u64_be(_twopc_current_offset.u64())
     wb.u64_be(_notify.acked_point_of_ref)
     let bs = wb.done()
 
@@ -671,10 +677,11 @@ actor ConnectorSink is Sink
 
     let r = Reader
     r.append(payload)
-    let a = try r.u64_be()? else Fail(); 0 end
-    @printf[I32]("Rollback: acked_point_of_ref %lu at ConnectorSink %s\n".cstring(), a, _sink_id.string().cstring())
-    _notify.acked_point_of_ref = a
-    _notify.message_id = a // SLF TODO: double-check but this feels quite wrong
+    _twopc_current_offset = try r.u64_be()?.usize() else Fail(); 0 end
+    _twopc_last_offset = _twopc_current_offset
+    _notify.acked_point_of_ref = try r.u64_be()? else Fail(); 0 end
+    _notify.message_id = _twopc_last_offset.u64()
+    @printf[I32]("2PC: Rollback: _twopc_last_offset %lu _twopc_current_offset %lu acked_point_of_ref %lu at ConnectorSink %s\n".cstring(), _twopc_last_offset, _twopc_current_offset, _notify.acked_point_of_ref, _sink_id.string().cstring())
 
     event_log.ack_rollback(_sink_id)
 
