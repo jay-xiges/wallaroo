@@ -411,6 +411,18 @@ actor ConnectorSink is Sink
       _barrier_initiator.abort_barrier(this, _twopc_barrier_token)
     end
 
+  fun _send_phase2(conn: WallarooOutgoingNetworkActor ref,
+    txn_id: String, commit: Bool)
+  =>
+    let b: Array[U8] val = cp.TwoPCEncode.phase2(txn_id, commit)
+    try
+      let msg: cp.MessageMsg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
+       _notify.send_msg(conn, msg)
+     else
+       Fail()
+    end
+    @printf[I32]("2PC: sent phase 2 commit=%s for txn_id %s\n".cstring(), commit.string().cstring(), txn_id.cstring())
+
   ///////////////
   // BARRIER
   ///////////////
@@ -553,20 +565,11 @@ actor ConnectorSink is Sink
       if (not (_twopc_state is cp.TwoPCFsm2Commit)) or
          (not _twopc_phase1_commit)
       then
-        Unreachable()
+        Fail()
       end
 
       checkpoint_state(sbt.id)
-
-      let b: Array[U8] val = cp.TwoPCEncode.phase2(_twopc_txn_id, true)
-      try
-        let msg: cp.MessageMsg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
-         _notify.send_msg(this, msg)
-       else
-        Unreachable()
-      end
-      @printf[I32]("2PC: sent phase 2 commit for txn_id %s\n".cstring(), _twopc_txn_id.cstring())
-
+      _send_phase2(this, _twopc_txn_id, true)
       _reset_2pc_state()
 
       @printf[I32]("WWWW: 1 _message_processor = NormalSinkMessageProcessor\n".cstring())
@@ -585,6 +588,7 @@ actor ConnectorSink is Sink
       @printf[I32]("WWWW: 7 _message_processor = NormalSinkMessageProcessor\n".cstring())
       _resume_processing_messages()
     end
+    None
 
   fun ref _resume_processing_messages() =>
     """
@@ -643,15 +647,6 @@ actor ConnectorSink is Sink
     _prepare_for_rollback()
 
   fun ref _prepare_for_rollback() =>
-    let b = cp.TwoPCEncode.phase2(_twopc_txn_id, false)
-    try
-      let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
-       _notify.send_msg(this, msg)
-     else
-      Fail()
-    end
-    @printf[I32]("2PC: sent phase 2 abort for txn_id %s\n".cstring(), _twopc_txn_id.cstring())
-
     _clear_barriers()
 
   be incremental_rollback(payload: ByteSeq val, event_log: EventLog,
@@ -683,6 +678,7 @@ actor ConnectorSink is Sink
 
     event_log.ack_rollback(_sink_id)
 
+    _send_phase2(this, _twopc_txn_id, false)
     _reset_2pc_state()
 
   ///////////////
