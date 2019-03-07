@@ -366,6 +366,12 @@ actor ConnectorSink is Sink
   // 2PC
   ///////////////
 
+  fun ref _reset_2pc_state() =>
+      _twopc_state = cp.TwoPCFsmStart
+      _twopc_txn_id = ""
+      _twopc_barrier_token = CheckpointBarrierToken(0)
+      _twopc_phase1_commit = false
+
   fun ref twopc_phase1_reply(txn_id: String, commit: Bool) =>
     """
     This is a callback used by the ConnectorSinkNotify class to Inform
@@ -391,6 +397,7 @@ actor ConnectorSink is Sink
     _event_log.checkpoint_state(_sink_id, _twopc_barrier_token.id,
       consume bs where is_last_entry = false)
 
+    _twopc_phase1_commit = commit
     if commit then
       _twopc_state = cp.TwoPCFsm2Commit
       @printf[I32]("2PC: txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
@@ -402,9 +409,6 @@ actor ConnectorSink is Sink
         txn_id.cstring())
 
       _barrier_initiator.abort_barrier(this, _twopc_barrier_token)
-
-      // TODO: send phase 2 commit message ... at the appropriate time
-
     end
 
   ///////////////
@@ -547,11 +551,26 @@ actor ConnectorSink is Sink
     None
     match token
     | let sbt: CheckpointBarrierToken =>
+      if (not (_twopc_state is cp.TwoPCFsm2Commit)) or
+         (not _twopc_phase1_commit)
+      then
+        Unreachable()
+      end
+
+      // TODO Send 2PC phase 2 commit
       checkpoint_state(sbt.id)
+      _reset_2pc_state()
 
       @printf[I32]("WWWW: 1 _message_processor = NormalSinkMessageProcessor\n".cstring())
       _resume_processing_messages()
     | let rbrt: CheckpointRollbackBarrierToken =>
+      if (not (_twopc_state is cp.TwoPCFsm2Abort)) or
+         _twopc_phase1_commit
+       then
+        @printf[I32]("RRRR: _twopc_state %d _twopc_phase1_commit %s\n".cstring(), _twopc_state(), _twopc_phase1_commit.string().cstring())
+        Unreachable()
+      end
+
       @printf[I32]("WWWW: 6 _message_processor = NormalSinkMessageProcessor\n".cstring())
       _resume_processing_messages()
     | let rbrt: CheckpointRollbackResumeBarrierToken =>
@@ -564,7 +583,7 @@ actor ConnectorSink is Sink
     2nd-half logic for barrier_fully_acked().
     """
     let queued = _message_processor.queued()
-    _message_processor = NormalSinkMessageProcessor(this)
+    _message_processor = NormalSinkMessageProcessor(this) // TODO use _clear_barriers() instead
     for q in queued.values() do
       match q
       | let qm: QueuedMessage =>
@@ -609,10 +628,6 @@ actor ConnectorSink is Sink
     _event_log.checkpoint_state(_sink_id, checkpoint_id,
       consume bs)
 
-    _twopc_state = cp.TwoPCFsmStart
-    _twopc_txn_id = ""
-    _twopc_barrier_token = CheckpointBarrierToken(0)
-
   be prepare_for_rollback() =>
     ifdef "checkpoint_trace" then
       @printf[I32]("Prepare for checkpoint rollback at ConnectorSink %s\n".cstring(), _sink_id.string().cstring())
@@ -621,9 +636,7 @@ actor ConnectorSink is Sink
 
   fun ref _prepare_for_rollback() =>
     _clear_barriers()
-    _twopc_state = cp.TwoPCFsmStart
-    _twopc_txn_id = ""
-    _twopc_barrier_token = CheckpointBarrierToken(0)
+    // TODO Send 2PC phase 2 abort
 
   be incremental_rollback(payload: ByteSeq val, event_log: EventLog,
     checkpoint_id: CheckpointId)
@@ -653,6 +666,8 @@ actor ConnectorSink is Sink
     _notify.message_id = a // SLF TODO: double-check but this feels quite wrong
 
     event_log.ack_rollback(_sink_id)
+
+    _reset_2pc_state()
 
   ///////////////
   // Connector
@@ -893,10 +908,7 @@ actor ConnectorSink is Sink
     _fd = -1
 
     // 2PC
-    _twopc_state = cp.TwoPCFsmStart
-    _twopc_txn_id = ""
-    _twopc_barrier_token = CheckpointBarrierToken(0)
-    _twopc_phase1_commit = false
+    _reset_2pc_state()
 
     _notify.closed(this)
 

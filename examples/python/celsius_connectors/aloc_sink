@@ -293,6 +293,7 @@ class AsyncServer(asynchat.async_chat, object):
         log = [time.time(), 'connection-closed', True]
         self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
         self._txn_log.flush()
+        self._out.write(b'<CONNECTION-CLOSED>\n')
 
 
 class EchoServer(asyncore.dispatcher):
