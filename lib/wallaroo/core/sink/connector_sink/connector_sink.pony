@@ -557,7 +557,14 @@ actor ConnectorSink is Sink
         Unreachable()
       end
 
-      // TODO Send 2PC phase 2 commit
+      let b = cp.TwoPCEncode.phase2(_twopc_txn_id, true)
+      try
+        let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
+         _notify.send_msg(this, msg)
+       else
+        Fail()
+      end
+      @printf[I32]("2PC: sent phase 2 commit for txn_id %s\n".cstring(), _twopc_txn_id.cstring())
       checkpoint_state(sbt.id)
       _reset_2pc_state()
 
@@ -635,8 +642,16 @@ actor ConnectorSink is Sink
     _prepare_for_rollback()
 
   fun ref _prepare_for_rollback() =>
+    let b = cp.TwoPCEncode.phase2(_twopc_txn_id, false)
+    try
+      let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
+       _notify.send_msg(this, msg)
+     else
+      Fail()
+    end
+    @printf[I32]("2PC: sent phase 2 abort for txn_id %s\n".cstring(), _twopc_txn_id.cstring())
+
     _clear_barriers()
-    // TODO Send 2PC phase 2 abort
 
   be incremental_rollback(payload: ByteSeq val, event_log: EventLog,
     checkpoint_id: CheckpointId)
