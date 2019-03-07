@@ -547,8 +547,7 @@ actor ConnectorSink is Sink
     ifdef "checkpoint_trace" then
       @printf[I32]("Barrier fully acked %s at ConnectorSink %s\n".cstring(), token.string().cstring(), _sink_id.string().cstring())
     end
-    // SLF TODO
-    None
+
     match token
     | let sbt: CheckpointBarrierToken =>
       if (not (_twopc_state is cp.TwoPCFsm2Commit)) or
@@ -557,17 +556,17 @@ actor ConnectorSink is Sink
         Unreachable()
       end
 
-/****
-      let b = cp.TwoPCEncode.phase2(_twopc_txn_id, true)
+      checkpoint_state(sbt.id)
+
+      let b: Array[U8] val = cp.TwoPCEncode.phase2(_twopc_txn_id, true)
       try
-        let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
+        let msg: cp.MessageMsg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
          _notify.send_msg(this, msg)
        else
-        Fail()
+        Unreachable()
       end
       @printf[I32]("2PC: sent phase 2 commit for txn_id %s\n".cstring(), _twopc_txn_id.cstring())
-****/
-      checkpoint_state(sbt.id)
+
       _reset_2pc_state()
 
       @printf[I32]("WWWW: 1 _message_processor = NormalSinkMessageProcessor\n".cstring())
