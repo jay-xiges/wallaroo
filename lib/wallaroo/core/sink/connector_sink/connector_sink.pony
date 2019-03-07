@@ -557,6 +557,7 @@ actor ConnectorSink is Sink
         Unreachable()
       end
 
+/****
       let b = cp.TwoPCEncode.phase2(_twopc_txn_id, true)
       try
         let msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [b])?
@@ -565,6 +566,7 @@ actor ConnectorSink is Sink
         Fail()
       end
       @printf[I32]("2PC: sent phase 2 commit for txn_id %s\n".cstring(), _twopc_txn_id.cstring())
+****/
       checkpoint_state(sbt.id)
       _reset_2pc_state()
 
