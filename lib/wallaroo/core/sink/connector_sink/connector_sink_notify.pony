@@ -95,19 +95,27 @@ class ConnectorSinkNotify
     _fsm_state = cp.ConnectorProtoFsmHandshake
 
   fun ref closed(conn: WallarooOutgoingNetworkActor ref) =>
+    """
+    We have no idea how much stuff that we've sent recently
+    has actually been received by the now-disconnected sink.
+    It *is* possible, however, that we sent nothing since the
+    last checkpoint; in this case, our TCP connection breaking
+    and re-connecting means no sink stream data has been lost,
+    so no rollback is required.
+
+    We are going to rely on the connector sink to figure out
+    if a rollback is necessary.  If the connector sink
+    discovers missing stream data after the reconnect (e.g.,
+    the TCP connection broke at output byte offset 100, then
+    after re-connecting, the first message_id Wallaroo sends
+    is greater than 100), then the connector sink must tell
+    us to abort in phase 1 in the next round of 2PC.
+    """
     @printf[I32]("ConnectorSink connection closed, muting upstreams\n".cstring())
     _connected = false
     _throttled = false
     twopc_intro_done = false
     throttled(conn)
-
-    // We have no idea how much stuff that we've sent recently
-    // has actually been received by the now-disconnected sink.
-    // We need to trigger a rollback so that when we re-connect, we can
-    // resend missing data.
-
-    try (conn as ConnectorSink ref).twopc_abort_after_reconnect = true
-      else Fail() end
 
   fun ref dispose() =>
     @printf[I32]("ConnectorSink connection dispose\n".cstring())

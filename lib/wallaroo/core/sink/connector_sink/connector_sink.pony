@@ -145,7 +145,6 @@ actor ConnectorSink is Sink
   var _twopc_phase1_commit: Bool = false
   var _twopc_last_offset: USize = 0
   var _twopc_current_offset: USize = 0
-  var twopc_abort_after_reconnect: Bool = false
 
   new create(sink_id: RoutingId, sink_name: String, event_log: EventLog,
     recovering: Bool, env: Env, encoder_wrapper: ConnectorEncoderWrapper,
@@ -375,7 +374,6 @@ actor ConnectorSink is Sink
     _twopc_txn_id = ""
     _twopc_barrier_token = CheckpointBarrierToken(0)
     _twopc_phase1_commit = false
-    twopc_abort_after_reconnect = false
 
   fun ref twopc_phase1_reply(txn_id: String, commit: Bool) =>
     """
@@ -536,17 +534,6 @@ actor ConnectorSink is Sink
         // backpressure system changes.
         @printf[I32]("2PC: preemptive abort: connector sink not fully connected\n".cstring())
         _abort_decision("connector sink not fully connected")
-
-        _twopc_txn_id = "preemptive txn abort"
-        _twopc_barrier_token = sbt
-        return
-      end
-      if twopc_abort_after_reconnect then
-        zzz left off here
-        no cannot abort here: we must send correct 2PC phase 1
-        and when the reply arrives UNCONDITIONALLY send phase 2 abort.
-        @printf[I32]("2PC: preemptive abort: connector sink was disconnected\n".cstring())
-        _abort_decision("connector sink was disconnected")
 
         _twopc_txn_id = "preemptive txn abort"
         _twopc_barrier_token = sbt
