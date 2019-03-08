@@ -247,7 +247,10 @@ class ConnectorSinkNotify
           // perhaps some time ago.  Meanwhile, it's possible that we
           // have already started a new round of 2PC ... so our new
           // round's txn_id may be in the txn_id's list.
-          // TODO: Double-check rtag # for sanity.
+          if mi.rtag != _rtag then
+            @printf[I32]("2PC: bad rtag match: %lu != %lu\n".cstring(), mi.rtag, _rtag)
+            Fail()
+          end
           ifdef "trace" then
             @printf[I32]("TRACE: uncommitted txns = %d\n".cstring(),
               mi.txn_ids.size())
@@ -274,9 +277,6 @@ class ConnectorSinkNotify
           twopc_intro_done = true
           unthrottled(conn)
         | let mi: cp.TwoPCReplyMsg =>
-          // TODO: Double-check txn_id for sanity
-          // TODO: If commit, then do stuff
-          // TODO: If not commit, then do other stuff
           @printf[I32]("2PC: reply for txn_id %s was %s\n".cstring(), mi.txn_id.cstring(), mi.commit.string().cstring())
           try (conn as ConnectorSink ref).twopc_phase1_reply(
             mi.txn_id, mi.commit)
@@ -290,7 +290,7 @@ class ConnectorSinkNotify
       end
     | let m: cp.AckMsg =>
       if _fsm_state is cp.ConnectorProtoFsmStreaming then
-        @printf[I32]("SLF TODO: Ack: credits %d list size = %d\n".cstring(), m.credits, m.credit_list.size())
+        // TODO: note that we aren't actually using credits
         credits = credits + m.credits
         for (s_id, p_o_r) in m.credit_list.values() do
           if s_id == _stream_id then
@@ -299,7 +299,6 @@ class ConnectorSinkNotify
               Fail()
             end
             acked_point_of_ref = p_o_r
-            @printf[I32]("SLF TODO: Ack: stream-id %lu new point of reference %lu\n".cstring(), _stream_id, acked_point_of_ref)
           else
             @printf[I32]("Ack: unknown stream_id %d\n".cstring(), s_id)
             Fail()

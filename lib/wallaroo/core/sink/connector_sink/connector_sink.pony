@@ -390,16 +390,6 @@ actor ConnectorSink is Sink
       Fail()
     end
 
-    let wb: Writer = wb.create()
-    // TODO: formalize this & doc it up
-    wb.u8(49) // ASCII 1
-    wb.u8(if commit then 1 else 0 end)
-    wb.u16_be(_twopc_txn_id.size().u16())
-    wb.write(_twopc_txn_id)
-    let bs = recover trn wb.done() end
-    _event_log.checkpoint_state(_sink_id, _twopc_barrier_token.id,
-      consume bs where is_last_entry = false)
-
     _twopc_phase1_commit = commit
     if commit then
       _twopc_state = cp.TwoPCFsm2Commit
@@ -627,7 +617,7 @@ actor ConnectorSink is Sink
     2nd-half logic for barrier_fully_acked().
     """
     let queued = _message_processor.queued()
-    _message_processor = NormalSinkMessageProcessor(this) // TODO use _clear_barriers() instead
+    _message_processor = NormalSinkMessageProcessor(this)
     for q in queued.values() do
       match q
       | let qm: QueuedMessage =>
@@ -688,12 +678,7 @@ actor ConnectorSink is Sink
     ifdef "checkpoint_trace" then
       @printf[I32]("Incremental rollback to %s at ConnectorSink %s\n".cstring(), checkpoint_id.string().cstring(), _sink_id.string().cstring())
     end
-
-    // TODO: If we need to reset any state contained in an
-    // incremental checkpoint payload, now is the time.
-    // At the moment, I think, there's nothing to do.
-
-    // Only call event_log.ack_rollback() for final rollback payload
+    Fail()
 
   be rollback(payload: ByteSeq val, event_log: EventLog,
     checkpoint_id: CheckpointId)
