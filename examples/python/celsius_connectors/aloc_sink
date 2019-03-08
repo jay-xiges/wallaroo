@@ -38,6 +38,9 @@ def look_for_forced_abort(path):
                 if a[1] == 'next-txn-force-abort':
                     res = False
                 elif a[1] == '1-ok':
+                    if res == False:
+                        print('FATAL ERROR: next-txn-force-abort followed by 1-ok')
+                        sys.exit(66)
                     res = True
                 elif a[1] == '1-rollback':
                     res = True
@@ -264,11 +267,6 @@ class AsyncServer(asynchat.async_chat, object):
 
     def handle_message_streamx(self, msg):
         bs = bytes(msg.message)
-        ret1 = self._out.write(bs)
-
-        if len(bs) != ret1:
-            self._txn_commit_next = False
-            raise Exception("File write error? {} != {} or {} != None".format(len(bs), ret1, ret2))
 
         for (stream_id, regexp) in self._txn_stream_content:
             if stream_id == msg.stream_id:
@@ -277,9 +275,15 @@ class AsyncServer(asynchat.async_chat, object):
                     print('2PC: abort next transaction: {} matches {}'
                         .format(regexp, bs))
 
-        if msg.message_id:
+        if msg.message_id != None:
             if self._out_offset == msg.message_id:
-                True
+                ret1 = self._out.write(bs)
+                if len(bs) != ret1:
+                    self._txn_commit_next = False
+                    raise Exception("File write error? {} != {} or {} != None".format(len(bs), ret1, ret2))
+                self._out_offset += len(msg.message)
+                self._streams[msg.stream_id][2] = msg.message_id
+                print('DBG: _out_offset is now {}'.format(self._out_offset))
             elif self._out_offset < msg.message_id:
                 m = 'ERROR: MISSING DATA: self._out_offset {} < msg.message_id {}'.format(self._out_offset, msg.message_id)
                 self._txn_commit_next = False
@@ -290,11 +294,11 @@ class AsyncServer(asynchat.async_chat, object):
                     self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
                     self.flush_fsync(self._txn_log)
             elif self._out_offset > msg.message_id:
-                print('FATAL ERROR: self._out_offset {} > msg.message_id {}'.format(self._out_offset, msg.message_id))
-                sys.exit(66)
-            self._streams[msg.stream_id][2] = msg.message_id
-        self._out_offset += len(msg.message)
-        print('DBG: _out_offset is now {}'.format(self._out_offset))
+                print('ERROR: duplicate data: self._out_offset {} > msg.message_id {}'.format(self._out_offset, msg.message_id))
+        else:
+            print('FATAL ERROR: message has no message_id')
+            sys.exit(66)
+
         if msg.flags & cwm.Message.Eos:
             # ack eos
             print("NH: acking eos for {}".format(msg))
