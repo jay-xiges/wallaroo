@@ -42,6 +42,8 @@ def send_feed():
     while value < 320:
         packet = struct.pack(">f", value)
         sock.sendto(packet, ('127.0.0.1', 8801))
+        if value == 11:
+            time.sleep(2.2)
         value += 1
         time.sleep(0.040)
 

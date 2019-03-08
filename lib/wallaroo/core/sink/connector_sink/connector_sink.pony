@@ -541,9 +541,19 @@ actor ConnectorSink is Sink
       end
 
       if _twopc_state is cp.TwoPCFsmStart then
-        // TODO: If no data has been processed by the sink since the last
-        // checkpoint, then don't bother with 2PC: skip directly to
-        // local state checkpoint to event log
+        if (_twopc_current_offset > 0) and
+           (_twopc_current_offset == _twopc_last_offset)
+        then
+          // If no data has been processed by the sink since the last
+          // checkpoint, then don't bother with 2PC.
+
+          @printf[I32]("2PC: no data written during this checkpoint interval, skipping 2PC round\n".cstring())
+          _barrier_initiator.ack_barrier(this, sbt)
+          _twopc_txn_id = ""
+          _twopc_phase1_commit = true
+          _twopc_state = cp.TwoPCFsm2Commit
+          return
+        end
 
         let checkpoint_id = sbt.id
         let txn_id = _notify.stream_name + ":c_id=" + checkpoint_id.string()
@@ -583,11 +593,14 @@ actor ConnectorSink is Sink
       if (not (_twopc_state is cp.TwoPCFsm2Commit)) or
          (not _twopc_phase1_commit)
       then
+        @printf[I32]("2PC: DBG: _twopc_state = %s, _twopc_phase1_commit %s\n".cstring(), _twopc_state().string().cstring(), _twopc_phase1_commit.string().cstring())
         Fail()
       end
 
       checkpoint_state(sbt.id)
-      _send_phase2(this, _twopc_txn_id, true)
+      if _twopc_txn_id != "" then
+        _send_phase2(this, _twopc_txn_id, true)
+      end
       _twopc_last_offset = _twopc_current_offset
       _reset_2pc_state()
 
@@ -816,7 +829,7 @@ actor ConnectorSink is Sink
       _try_shutdown()
     end
 
-  fun ref _report_ready_to_work() =>
+  fun ref report_ready_to_work() =>
     match _initializer
     | let initializer: LocalTopologyInitializer =>
       initializer.report_ready_to_work(this)

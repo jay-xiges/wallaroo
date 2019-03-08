@@ -34,12 +34,12 @@ def look_for_forced_abort(path):
     try:
         with open(path, 'rb') as f:
             for l in f:
-                (_, op) = eval(l)
-                if op == 'next-txn-force-abort':
+                a = eval(l)
+                if a[1] == 'next-txn-force-abort':
                     res = False
-                elif op == '1-ok':
+                elif a[1] == '1-ok':
                     res = True
-                elif op == '1-rollback':
+                elif a[1] == '1-rollback':
                     res = True
         return res
     except FileNotFoundError:
@@ -282,9 +282,9 @@ class AsyncServer(asynchat.async_chat, object):
                 True
             elif self._out_offset < msg.message_id:
                 m = 'ERROR: MISSING DATA: self._out_offset {} < msg.message_id {}'.format(self._out_offset, msg.message_id)
-                print(m)
                 self._txn_commit_next = False
                 if not self._next_txn_force_abort_written:
+                    print(m)
                     self._next_txn_force_abort_written = True
                     log = [time.time(), 'next-txn-force-abort', m]
                     self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))

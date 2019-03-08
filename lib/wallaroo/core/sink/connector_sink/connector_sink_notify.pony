@@ -260,45 +260,15 @@ class ConnectorSinkNotify
               send_msg(conn, abort_msg)
             end
           end
-
-/****
-          // TODO: remove this dev/scaffolding hack
-          let txn_id = "bogus-txn-0"
-
-          // DEBUG: This 5005 offset is bogus (i.e., too big), so the
-          // connector sink proc will crash.  That means that this sink
-          // will never be able to reconnect its TCP socket, which is
-          // useful for some testing scenarios.
-          // let p1 = cp.TwoPCEncode.phase1(txn_id, [(U64(1), U64(0), U64(5005))])
-          let p1 = cp.TwoPCEncode.phase1(txn_id, [(U64(1), U64(0), U64(0))])
-
-          let p1_msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [p1])?
-          send_msg(conn, p1_msg)
-          // Silly us, not waiting for phase 1's reply. But this is a hack.
-          // And if our sink sends an phase 1 abort, then it should definitely
-          // recognize that this phase 2 message is bogus.
-          let p2 = cp.TwoPCEncode.phase2(txn_id, true)
-          let p2_msg = cp.MessageMsg(0, cp.Ephemeral(), 0, 0, None, [p2])?
-          send_msg(conn, p2_msg)
-          // TODO: END OF remove this dev/scaffolding hack
-****/
           @printf[I32]("2PC: aborted %d stale transactions\n".cstring(),
             mi.txn_ids.size())
 
           if _connection_count == 1 then
             try
-              (conn as ConnectorSink ref)._report_ready_to_work()
+              (conn as ConnectorSink ref).report_ready_to_work()
             else
               Fail()
             end
-          else
-            // We have no idea how much stuff that we had sent during
-            // the last connection has actually been received by the
-            // sink.
-            // TODO: maybe, do stuff here??
-            // We need to trigger a rollback so that when we re-connect, we can
-            // resend missing data.  That trigger's location is after the
-            // re-connect and after ListUncommitted's reply.
             None
           end
           twopc_intro_done = true
