@@ -39,7 +39,7 @@ class ConnectorSinkNotify
   var _connection_count: USize = 0
   // 2PC
   var _rtag: U64 = 77777
-  var _twopc_intro_done: Bool = false
+  var twopc_intro_done: Bool = false
 
   new create(sink_id: RoutingId) =>
     _sink_id = sink_id
@@ -61,7 +61,7 @@ class ConnectorSinkNotify
     _header = true
     _connected = true
     _throttled = false
-    _twopc_intro_done = false
+    twopc_intro_done = false
     _connection_count = _connection_count + 1
     // Apply runtime throttle until we're done with initial 2PC ballet.
     throttled(conn)
@@ -98,15 +98,16 @@ class ConnectorSinkNotify
     @printf[I32]("ConnectorSink connection closed, muting upstreams\n".cstring())
     _connected = false
     _throttled = false
-    _twopc_intro_done = false
+    twopc_intro_done = false
     throttled(conn)
 
     // We have no idea how much stuff that we've sent recently
     // has actually been received by the now-disconnected sink.
     // We need to trigger a rollback so that when we re-connect, we can
-    // resend missing data.  That trigger's location is after the
-    // re-connect and after ListUncommitted's reply.
-    // TODO: maybe, do stuff here??
+    // resend missing data.
+
+    try (conn as ConnectorSink ref).twopc_abort_after_reconnect = true
+      else Fail() end
 
   fun ref dispose() =>
     @printf[I32]("ConnectorSink connection dispose\n".cstring())
@@ -158,7 +159,7 @@ class ConnectorSinkNotify
     data
 
   fun ref throttled(conn: WallarooOutgoingNetworkActor ref) =>
-    if (not _throttled) or (not _twopc_intro_done) then
+    if (not _throttled) or (not twopc_intro_done) then
       _throttled = true
       // SLF TODO: thread through an auth thingie then use Backpressure.apply()
       @pony_apply_backpressure[None]()
@@ -167,7 +168,7 @@ class ConnectorSinkNotify
     end
 
   fun ref unthrottled(conn: WallarooOutgoingNetworkActor ref) =>
-    if _throttled and _twopc_intro_done then
+    if _throttled and twopc_intro_done then
       _throttled = false
       // SLF TODO: thread through an auth thingie then use Backpressure.release()
       @pony_release_backpressure[None]()
@@ -292,7 +293,7 @@ class ConnectorSinkNotify
             // re-connect and after ListUncommitted's reply.
             None
           end
-          _twopc_intro_done = true
+          twopc_intro_done = true
           unthrottled(conn)
         | let mi: cp.TwoPCReplyMsg =>
           // TODO: Double-check txn_id for sanity

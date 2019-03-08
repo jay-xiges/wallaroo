@@ -145,6 +145,7 @@ actor ConnectorSink is Sink
   var _twopc_phase1_commit: Bool = false
   var _twopc_last_offset: USize = 0
   var _twopc_current_offset: USize = 0
+  var twopc_abort_after_reconnect: Bool = false
 
   new create(sink_id: RoutingId, sink_name: String, event_log: EventLog,
     recovering: Bool, env: Env, encoder_wrapper: ConnectorEncoderWrapper,
@@ -370,10 +371,11 @@ actor ConnectorSink is Sink
   ///////////////
 
   fun ref _reset_2pc_state() =>
-      _twopc_state = cp.TwoPCFsmStart
-      _twopc_txn_id = ""
-      _twopc_barrier_token = CheckpointBarrierToken(0)
-      _twopc_phase1_commit = false
+    _twopc_state = cp.TwoPCFsmStart
+    _twopc_txn_id = ""
+    _twopc_barrier_token = CheckpointBarrierToken(0)
+    _twopc_phase1_commit = false
+    twopc_abort_after_reconnect = false
 
   fun ref twopc_phase1_reply(txn_id: String, commit: Bool) =>
     """
@@ -407,12 +409,15 @@ actor ConnectorSink is Sink
 
       _barrier_initiator.ack_barrier(this, _twopc_barrier_token)
     else
-      _twopc_state = cp.TwoPCFsm2Abort
-      @printf[I32]("2PC: twopc_reply: txn_id %s phase 1 ABORT\n".cstring(),
-        txn_id.cstring())
-
-      _barrier_initiator.abort_barrier(this, _twopc_barrier_token)
+      _abort_decision("phase 1 ABORT")
     end
+
+  fun ref _abort_decision(reason: String) =>
+    @printf[I32]("2PC: twopc_reply: txn_id %s %s\n".cstring(),
+      _twopc_txn_id.cstring(), reason.cstring())
+
+    _twopc_state = cp.TwoPCFsm2Abort
+    _barrier_initiator.abort_barrier(this, _twopc_barrier_token)
 
   fun _send_phase2(conn: WallarooOutgoingNetworkActor ref,
     txn_id: String, commit: Bool)
@@ -523,8 +528,30 @@ actor ConnectorSink is Sink
     end
     match barrier_token
     | let sbt: CheckpointBarrierToken =>
-      // TODO left off here: if we aren't connected and done the initial
-      // 2PC abort dance, then we cannot start a round of 2PC here & now!
+      if not _notify.twopc_intro_done then
+        // This sink applies Pony runtime backpressure when disconnected,
+        // so it's quite unlikely that we will get here: sending
+        // messages to us will block the senders.  However, the nature
+        // of backpressure may change over time as the runtime's
+        // backpressure system changes.
+        @printf[I32]("2PC: preemptive abort: connector sink not fully connected\n".cstring())
+        _abort_decision("connector sink not fully connected")
+
+        _twopc_txn_id = "preemptive txn abort"
+        _twopc_barrier_token = sbt
+        return
+      end
+      if twopc_abort_after_reconnect then
+        zzz left off here
+        no cannot abort here: we must send correct 2PC phase 1
+        and when the reply arrives UNCONDITIONALLY send phase 2 abort.
+        @printf[I32]("2PC: preemptive abort: connector sink was disconnected\n".cstring())
+        _abort_decision("connector sink was disconnected")
+
+        _twopc_txn_id = "preemptive txn abort"
+        _twopc_barrier_token = sbt
+        return
+      end
 
       if _twopc_state is cp.TwoPCFsmStart then
         // TODO: If no data has been processed by the sink since the last

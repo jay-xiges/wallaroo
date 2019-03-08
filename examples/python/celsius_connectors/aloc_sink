@@ -2,6 +2,7 @@
 
 import asyncore
 import asynchat
+import os
 import random
 import re
 import socket
@@ -36,6 +37,7 @@ class AsyncServer(asynchat.async_chat, object):
         self._out_path = out_path
         self._out = open(self._out_path, 'ab')
         self._out_offset = self._out.tell()
+        print('DBG: top of AsyncServer self._out_offset = {}'.format(self._out_offset))
         self._txn_log = open(self._out_path + ".txnlog", 'ab')
         self._abort_rule_path = abort_rule_path
         asynchat.async_chat.__init__(self, sock=self._conn)
@@ -133,6 +135,7 @@ class AsyncServer(asynchat.async_chat, object):
     def handle_message_stream0(self, msg):
         msg2 = cwm.TwoPCFrame.decode(msg.message)
         if isinstance(msg2, cwm.ListUncommitted):
+            time.sleep(3.0) ### debug only!
             uncommitted = list(self._txn_state.keys())
             uncommitted.append("doesnt.exist.txn.aborting-wont-hurt.-----0-0")
             reply = cwm.ReplyUncommitted(msg2.rtag, uncommitted)
@@ -176,9 +179,10 @@ class AsyncServer(asynchat.async_chat, object):
                         print('2PC: abort next transaction: regexp {} matches txn_id {}'
                             .format(r[1], msg2.txn_id))
 
-            # TODO: fsync ... Too bad Python doesn't allow us to use fsync
-            # without going around to the 'os' module.  We're going to skip
-            # the fsync for now.
+            self._out.flush()
+            os.fsync(self._out.fileno())
+            self._txn_log.flush()
+            os.fsync(self._txn_log.fileno())
 
             success = self._txn_commit_next
             reply = cwm.TwoPCReply(str(msg2.txn_id).encode('utf-8'), success)
@@ -257,8 +261,13 @@ class AsyncServer(asynchat.async_chat, object):
                         .format(regexp, bs))
 
         if msg.message_id:
-            if self._out_offset != msg.message_id:
-                print('ERROR: self._out_offset {} != msg.message_id {}'.format(self._out_offset, msg.message_id))
+            if self._out_offset == msg.message_id:
+                True
+            elif self._out_offset < msg.message_id:
+                print('FATAL ERROR: self._out_offset {} < msg.message_id {}'.format(self._out_offset, msg.message_id))
+                sys.exit(66)
+            elif self._out_offset > msg.message_id:
+                print('FATAL ERROR: self._out_offset {} > msg.message_id {}'.format(self._out_offset, msg.message_id))
                 sys.exit(66)
             self._streams[msg.stream_id][2] = msg.message_id
         self._out_offset += len(msg.message)
@@ -300,7 +309,7 @@ class AsyncServer(asynchat.async_chat, object):
         log = [time.time(), 'connection-closed', True]
         self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
         self._txn_log.flush()
-        self._out.write(b'<CONNECTION-CLOSED>\n')
+        ### self._out.write(b'<DEBUG-ONLY-CONNECTION-CLOSED>\n')
 
 
 class EchoServer(asyncore.dispatcher):
