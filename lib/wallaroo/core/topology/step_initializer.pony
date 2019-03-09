@@ -144,7 +144,7 @@ class val EgressBuilder
       recover Map[String, OutgoingBoundary] end): Sink
   =>
     _sink_builder(_name, event_log, reporter.clone(), env, barrier_initiator,
-      checkpoint_initiator, recovering)
+      checkpoint_initiator, recovering, worker_name, auth)
 
 class val MultiSinkBuilder
   let _name: String
@@ -177,7 +177,7 @@ class val MultiSinkBuilder
     let sinks = recover iso Array[Sink] end
     for sb in _sink_builders.values() do
       let next_sink = sb(_name, event_log, reporter.clone(), env,
-        barrier_initiator, checkpoint_initiator, recovering)
+        barrier_initiator, checkpoint_initiator, recovering, worker_name, auth)
       sinks.push(next_sink)
     end
     consume sinks

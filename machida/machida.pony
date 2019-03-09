@@ -1044,10 +1044,9 @@ primitive _SinkConfig
       end
 
       let cookie = recover val
-        String.copy_cstring(@PyString_AsString(@PyTuple_GetItem(sink_config_tuple, 5)))
+        String.copy_cstring(@PyString_AsString(@PyTuple_GetItem(sink_config_tuple, 6)))
       end
-
-      ConnectorSinkConfig[PyData val](encoder, host, port, cookie)
+      ConnectorSinkConfig[PyData val](encoder, host, port, "v0.0.1", cookie)
     else
       error
     end

@@ -32,6 +32,10 @@ class ConnectorSinkNotify
   var _throttled: Bool = false
   let _stream_id: cp.StreamId = 1
   let _sink_id: RoutingId
+  let _worker_name: WorkerName
+  let _protocol_version: String
+  let _cookie: String
+  let _auth: ApplyReleaseBackpressureAuth
   let stream_name: String
   var credits: U32 = 0
   var acked_point_of_ref: cp.MessageId = 0
@@ -41,11 +45,17 @@ class ConnectorSinkNotify
   var _rtag: U64 = 77777
   var twopc_intro_done: Bool = false
 
-  new create(sink_id: RoutingId) =>
+  new create(sink_id: RoutingId, worker_name: WorkerName,
+    protocol_version: String, cookie: String,
+    auth: ApplyReleaseBackpressureAuth)
+  =>
     _sink_id = sink_id
+    _worker_name = worker_name
+    _protocol_version = protocol_version
+    _cookie = cookie
+    _auth = auth
 
-    // SLF TODO: what is our worker name?
-    stream_name = "worker-QQQ-id-" + _sink_id.string()
+    stream_name = "worker-" + worker_name + "-id-" + _sink_id.string()
 
   fun ref accepted(conn: WallarooOutgoingNetworkActor ref) =>
     Unreachable()
@@ -67,11 +77,10 @@ class ConnectorSinkNotify
     throttled(conn)
     conn.expect(4)
 
-    // SLF: TODO: configure version string
-    // SLF: TODO: configure cookie string
-    // SLF: TODO: configure program string
-    // SLF: TODO: configure instance_name string
-    let hello = cp.HelloMsg("v0.0.1", "Dragons Love Tacos", "a program", "an instance")
+    // TODO: configure connector v2 program string
+    // TODO: configure connector v2 instance_name string
+    let hello = cp.HelloMsg(_protocol_version, _cookie,
+      "a program", "an instance")
     send_msg(conn, hello)
 
     // 2PC: We don't know how many transactions the sink has that
@@ -169,8 +178,7 @@ class ConnectorSinkNotify
   fun ref throttled(conn: WallarooOutgoingNetworkActor ref) =>
     if (not _throttled) or (not twopc_intro_done) then
       _throttled = true
-      // SLF TODO: thread through an auth thingie then use Backpressure.apply()
-      @pony_apply_backpressure[None]()
+      Backpressure.apply(_auth)
       @printf[I32](("ConnectorSink is experiencing back pressure, " +
         "connected = %s\n").cstring(), _connected.string().cstring())
     end
@@ -178,8 +186,7 @@ class ConnectorSinkNotify
   fun ref unthrottled(conn: WallarooOutgoingNetworkActor ref) =>
     if _throttled and twopc_intro_done then
       _throttled = false
-      // SLF TODO: thread through an auth thingie then use Backpressure.release()
-      @pony_release_backpressure[None]()
+      Backpressure.release(_auth)
       @printf[I32](("ConnectorSink is no longer experiencing" +
         " back pressure, connected = %s\n").cstring(),
       _connected.string().cstring())

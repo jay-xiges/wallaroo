@@ -114,6 +114,12 @@ class AsyncServer(asynchat.async_chat, object):
         # Hello, Ok, Error, Notify, NotifyAck, Message, Ack, Restart
         self.count = 0
         if isinstance(msg, cwm.Hello):
+            if msg.version != "v0.0.1":
+                print('FATAL ERROR: bad protocol version: {}'.format(msg.version))
+                sys.exit(66)
+            if msg.cookie != "Dragons Love Tacos!":
+                print('FATAL ERROR: bad cookie: {}'.format(msg.cookie))
+                sys.exit(66)
             # As of 2019-03-04, Wallaroo's connector sink is not managing
             # credits and will rely solely on TCP backpressure for its
             # own backpressure signalling.

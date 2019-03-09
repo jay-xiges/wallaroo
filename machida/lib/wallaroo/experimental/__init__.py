@@ -70,7 +70,7 @@ class SinkConnectorConfig(object):
         self._decoder = decoder
 
     def to_tuple(self):
-        return ("sink_connector", self._name, self._host, str(self._port), self._encoder, self._decoder)
+        return ("sink_connector", self._name, self._host, str(self._port), self._encoder, self._decoder, self._cookie)
 
 
 class SourceConnector(object):

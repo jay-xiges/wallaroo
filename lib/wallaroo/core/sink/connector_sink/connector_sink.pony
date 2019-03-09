@@ -27,6 +27,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
+use "backpressure"
 use "buffered"
 use "collections"
 use "net"
@@ -131,6 +132,10 @@ actor ConnectorSink is Sink
   var _reconnect_pause: U64
   var _host: String
   var _service: String
+  let _worker_name: WorkerName
+  let _protocol_version: String
+  let _cookie: String
+  let _auth: ApplyReleaseBackpressureAuth
   var _from: String
 
   // Producer (Resilience)
@@ -150,7 +155,10 @@ actor ConnectorSink is Sink
     recovering: Bool, env: Env, encoder_wrapper: ConnectorEncoderWrapper,
     metrics_reporter: MetricsReporter iso,
     barrier_initiator: BarrierInitiator, checkpoint_initiator: CheckpointInitiator,
-    host: String, service: String, initial_msgs: Array[Array[ByteSeq] val] val,
+    host: String, service: String, worker_name: WorkerName,
+    protocol_version: String, cookie: String,
+    auth: ApplyReleaseBackpressureAuth,
+    initial_msgs: Array[Array[ByteSeq] val] val,
     from: String = "", init_size: USize = 64, max_size: USize = 16384,
     reconnect_pause: U64 = 500_000_000 /* TODO: 10_000_000_000 */)
   =>
@@ -171,11 +179,16 @@ actor ConnectorSink is Sink
     _read_buf = recover Array[U8].>undefined(init_size) end
     _next_size = init_size
     _max_size = max_size
-    _notify = ConnectorSinkNotify(_sink_id)
+    _notify = ConnectorSinkNotify(
+      _sink_id, worker_name, protocol_version, cookie, auth)
     _initial_msgs = initial_msgs
     _reconnect_pause = reconnect_pause
     _host = host
     _service = service
+    _worker_name = worker_name
+    _protocol_version = protocol_version
+    _cookie = cookie
+    _auth = auth
     _from = from
     _connect_count = 0
     @printf[I32]("WWWW: 0 _message_processor = NormalSinkMessageProcessor\n".cstring())
