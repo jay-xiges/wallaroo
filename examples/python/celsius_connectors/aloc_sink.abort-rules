@@ -4,3 +4,5 @@
 ("txnid-regexp", "REGEXP GOES HERE --Kilroy", False, False)
 ("stream-content", "STREAM ID HERE as an integer!", "REGEXP HERE", False, False)
 ("stream-content", 1, '149\.0')
+("local-txn", 7, True, False)
+("local-txn", 10, True, False)
