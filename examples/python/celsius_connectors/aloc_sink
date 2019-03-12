@@ -108,8 +108,7 @@ class AsyncServer(asynchat.async_chat, object):
             self._handle_frame(frame_data)
 
     def _handle_frame(self, frame):
-        self.received_count += 1
-        self.updated_received_count()
+        self.update_received_count()
         msg = cwm.Frame.decode(frame)
         # Hello, Ok, Error, Notify, NotifyAck, Message, Ack, Restart
         self.count = 0
@@ -243,6 +242,8 @@ class AsyncServer(asynchat.async_chat, object):
                         self._out.truncate(start_por)
                         self.flush_fsync(self._out)
                         self._out_offset = start_por
+                        self._streams[stream_id][2] = start_por
+
                 if not phase1_status and msg2.commit:
                     print('2PC: mute/unmute placeholder 1 @ aloc_sink')
                     print('2PC: Protocol error: phase 1 status was rollback but phase 2 says commit')
@@ -316,7 +317,8 @@ class AsyncServer(asynchat.async_chat, object):
         data = cwm.Frame.encode(msg)
         super(AsyncServer, self).push(data)
 
-    def updated_received_count(self):
+    def update_received_count(self):
+        self.received_count += 1
         if self.received_count % 100 == 0:
             print("Sending ack for streams!")
             ack = cwm.Ack(
