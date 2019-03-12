@@ -270,9 +270,12 @@ class ConnectorSinkNotify
               send_msg(conn, abort_msg)
             end
           end
-          @printf[I32]("2PC: aborted %d stale transactions\n".cstring(),
-            mi.txn_ids.size())
+          (let state, let txn_id) = (conn as ConnectorSink ref).what_yer_status()
+          @printf[I32]("2PC: aborted %d stale transactions but DEBUGDEBUGDEBUG %d @ %s\n".cstring(),
+            mi.txn_ids.size(), state, txn_id.cstring())
 
+          twopc_intro_done = true
+          unthrottled(conn)
           if _connection_count == 1 then
             try
               (conn as ConnectorSink ref).report_ready_to_work()
@@ -280,9 +283,9 @@ class ConnectorSinkNotify
               Fail()
             end
             None
+          else
+            try (conn as ConnectorSink ref).twopc_intro_done() else Fail() end
           end
-          twopc_intro_done = true
-          unthrottled(conn)
         | let mi: cp.TwoPCReplyMsg =>
           @printf[I32]("2PC: reply for txn_id %s was %s\n".cstring(), mi.txn_id.cstring(), mi.commit.string().cstring())
           try (conn as ConnectorSink ref).twopc_phase1_reply(

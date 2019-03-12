@@ -146,7 +146,13 @@ actor ConnectorSink is Sink
   // 2PC
   var _twopc_state: cp.TwoPCFsmState = cp.TwoPCFsmStart
   var _twopc_txn_id: String = ""
-  var _twopc_barrier_token: CheckpointBarrierToken = CheckpointBarrierToken(0)
+  var _twopc_txn_id_at_close: String = ""
+  var _twopc_barrier_token_initial: CheckpointBarrierToken =
+    CheckpointBarrierToken(0)
+  var _twopc_barrier_token: CheckpointBarrierToken =
+    _twopc_barrier_token_initial
+  var _twopc_barrier_token_at_close: CheckpointBarrierToken =
+    _twopc_barrier_token_initial
   var _twopc_phase1_commit: Bool = false
   var _twopc_last_offset: USize = 0
   var _twopc_current_offset: USize = 0
@@ -419,15 +425,17 @@ actor ConnectorSink is Sink
 
       _barrier_initiator.ack_barrier(this, _twopc_barrier_token)
     else
-      _abort_decision("phase 1 ABORT")
+      _abort_decision("phase 1 ABORT", _twopc_txn_id, _twopc_barrier_token)
     end
 
-  fun ref _abort_decision(reason: String) =>
-    @printf[I32]("2PC: twopc_reply: txn_id %s %s\n".cstring(),
-      _twopc_txn_id.cstring(), reason.cstring())
+  fun ref _abort_decision(reason: String, txn_id: String,
+    barrier_token: CheckpointBarrierToken)
+  =>
+    @printf[I32]("2PC: _abort_decision: txn_id %s %s\n".cstring(),
+      txn_id.cstring(), reason.cstring())
 
     _twopc_state = cp.TwoPCFsm2Abort
-    _barrier_initiator.abort_barrier(this, _twopc_barrier_token)
+    _barrier_initiator.abort_barrier(this, barrier_token)
 
   fun _send_phase2(conn: WallarooOutgoingNetworkActor ref,
     txn_id: String, commit: Bool)
@@ -440,6 +448,22 @@ actor ConnectorSink is Sink
        Fail()
     end
     @printf[I32]("2PC: sent phase 2 commit=%s for txn_id %s\n".cstring(), commit.string().cstring(), txn_id.cstring())
+
+  fun ref what_yer_status(): (U8, String) =>
+    (_twopc_state(), _twopc_txn_id)
+
+  fun ref twopc_intro_done() =>
+    if _twopc_barrier_token_at_close != _twopc_barrier_token_initial then
+      @printf[I32]("2PC: Wallaroo local abort for txn_id %s barrier %s\n".cstring(), _twopc_txn_id_at_close.cstring(), _twopc_barrier_token_at_close.string().cstring())
+
+      _abort_decision("TCP connection closed during 2PC",
+        _twopc_txn_id_at_close, _twopc_barrier_token_at_close)
+      _reset_2pc_state()
+      // expected 2PC state when CheckpointRollbackBarrierToken arrives
+      _twopc_state = cp.TwoPCFsm2Abort
+      _twopc_txn_id_at_close = ""
+      _twopc_barrier_token_at_close = _twopc_barrier_token_initial
+    end
 
   ///////////////
   // BARRIER
@@ -545,7 +569,8 @@ actor ConnectorSink is Sink
         // of backpressure may change over time as the runtime's
         // backpressure system changes.
         @printf[I32]("2PC: preemptive abort: connector sink not fully connected\n".cstring())
-        _abort_decision("connector sink not fully connected")
+        _abort_decision("connector sink not fully connected",
+          _twopc_txn_id, _twopc_barrier_token)
 
         _twopc_txn_id = "preemptive txn abort"
         _twopc_barrier_token = sbt
@@ -961,6 +986,8 @@ actor ConnectorSink is Sink
     _fd = -1
 
     // 2PC
+    _twopc_txn_id_at_close = _twopc_txn_id
+    _twopc_barrier_token_at_close = _twopc_barrier_token
     _reset_2pc_state()
 
     _notify.closed(this)
