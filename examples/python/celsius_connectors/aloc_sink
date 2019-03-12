@@ -29,6 +29,22 @@ def parse_abort_rules(path):
     except FileNotFoundError:
         return []
 
+def reload_phase1_txn_state(path):
+    txn_state = {}
+    try:
+        with open(path, 'rb') as f:
+            for l in f:
+                a = eval(l)
+                if a[1] == '1-ok':
+                    txn_state[a[2]] = (True, a[3])
+                if a[1] == '1-rollback':
+                    txn_state[a[2]] = (False, a[3])
+                if (a[1] == '2-ok') or (a[1] == '2-rollback'):
+                    del txn_state[a[2]]
+    except FileNotFoundError:
+        True
+    return txn_state
+
 def look_for_forced_abort(path):
     res = True # res will become self._txn_commit_next's value
     try:
@@ -83,6 +99,8 @@ class AsyncServer(asynchat.async_chat, object):
                 self._txn_stream_content.append((stream_id, regexp))
                 # NOTE: This type doesn't have extended disconnect control!
 
+        self._txn_state = reload_phase1_txn_state(txn_log_path)
+        print('DBG: restored txn state: {}'.format(self._txn_state))
         self._txn_commit_next = look_for_forced_abort(txn_log_path)
         print('2PC: top: self._txn_commit_next = {}'.format(self._txn_commit_next))
 
@@ -252,7 +270,7 @@ class AsyncServer(asynchat.async_chat, object):
             raise Exception("Bad stream ID 0 message: {}".format(msg2))
         elif isinstance(msg2, cwm.TwoPCPhase2):
             print('2PC: Phase 2 got {}'.format(msg2))
-            print('2PC: Phase 2 txn_state = {}'.format(self._txn_state))
+            print('2PC: Phase 2 pre txn_state = {}'.format(self._txn_state))
             if msg2.txn_id in self._txn_state:
                 (phase1_status, where_list) = self._txn_state[msg2.txn_id]
                 if not msg2.commit:
@@ -282,7 +300,7 @@ class AsyncServer(asynchat.async_chat, object):
                 self.log_it([log_tag, msg2.txn_id, offset])
 
                 del self._txn_state[msg2.txn_id]
-                print('2PC: Phase 2 txn_state = {}'.format(self._txn_state))
+                print('2PC: Phase 2 post txn_state = {}'.format(self._txn_state))
             else:
                 print('2PC: ERROR: Phase 2 got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
                 self.log_it(['2-error', msg2.txn_id, msg2.commit])
