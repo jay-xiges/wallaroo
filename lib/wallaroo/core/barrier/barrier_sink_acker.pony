@@ -87,7 +87,13 @@ class BarrierSinkAcker
     ack_barrier_if_complete: Bool)
    =>
     if inputs.size() == _inputs_blocking.size() then
-      _barrier_coordinator.ack_barrier(_sink, _barrier_token)
+      if ack_barrier_if_complete then
+        _barrier_coordinator.ack_barrier(_sink, _barrier_token)
+      else
+        // The sink has told us that it is responsible for calling
+        // _barrier_coordinator.ack_barrier()
+        None
+      end
       let b_token = _barrier_token
       clear()
       _sink.barrier_complete(b_token)

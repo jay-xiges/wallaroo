@@ -423,7 +423,7 @@ actor ConnectorSink is Sink
       _twopc_state = cp.TwoPCFsm2Commit
       @printf[I32]("2PC: txn_id %s was %s\n".cstring(), txn_id.cstring(), commit.string().cstring())
 
-      _barrier_initiator.ack_barrier(this, _twopc_barrier_token)
+      _barrier_coordinator.ack_barrier(this, _twopc_barrier_token)
     else
       _abort_decision("phase 1 ABORT", _twopc_txn_id, _twopc_barrier_token)
     end
@@ -435,7 +435,7 @@ actor ConnectorSink is Sink
       txn_id.cstring(), reason.cstring())
 
     _twopc_state = cp.TwoPCFsm2Abort
-    _barrier_initiator.abort_barrier(this, barrier_token)
+    _barrier_coordinator.abort_barrier(barrier_token)
 
   fun _send_phase2(conn: WallarooOutgoingNetworkActor ref,
     txn_id: String, commit: Bool)
@@ -585,7 +585,7 @@ actor ConnectorSink is Sink
           // checkpoint, then don't bother with 2PC.
 
           @printf[I32]("2PC: no data written during this checkpoint interval, skipping 2PC round\n".cstring())
-          _barrier_initiator.ack_barrier(this, sbt)
+          _barrier_coordinator.ack_barrier(this, sbt)
           _twopc_txn_id = ""
           _twopc_phase1_commit = true
           _twopc_state = cp.TwoPCFsm2Commit
