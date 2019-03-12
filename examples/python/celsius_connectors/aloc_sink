@@ -81,6 +81,7 @@ class AsyncServer(asynchat.async_chat, object):
                 stream_id = t[1]
                 regexp = t[2]
                 self._txn_stream_content.append((stream_id, regexp))
+                # NOTE: This type doesn't have extended disconnect control!
 
         self._txn_commit_next = look_for_forced_abort(txn_log_path)
         print('2PC: top: self._txn_commit_next = {}'.format(self._txn_commit_next))
@@ -202,8 +203,9 @@ class AsyncServer(asynchat.async_chat, object):
                         print('2PC: abort next transaction: local txn count {}'
                             .format(self._txn_local_count))
                         try:
-                            close_before = r[2]
-                            close_after = r[3]
+                            success = r[2]
+                            close_before = r[3]
+                            close_after = r[4]
                         except:
                             True
                 elif r[0] == 'txnid-regexp':
@@ -212,8 +214,9 @@ class AsyncServer(asynchat.async_chat, object):
                         print('2PC: abort next transaction: regexp {} matches txn_id {}'
                             .format(r[1], msg2.txn_id))
                         try:
-                            close_before = r[2]
-                            close_after = r[3]
+                            success = r[2]
+                            close_before = r[3]
+                            close_after = r[4]
                         except:
                             True
 
@@ -228,7 +231,7 @@ class AsyncServer(asynchat.async_chat, object):
                 log_tag = '1-rollback'
             self.log_it([log_tag, msg2.txn_id, msg2.where_list])
 
-            print("CCCC: close_before {} close_after {}".format(close_before, close_after))
+            print("CCCC: success {} close_before {} close_after {}".format(success, close_before, close_after))
             if close_before:
                 self.log_it(['close', 'before reply'])
                 self.close()
