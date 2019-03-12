@@ -239,8 +239,17 @@ actor ConnectorSink is Sink
     ifdef "trace" then
       @printf[I32]("Rcvd msg at ConnectorSink\n".cstring())
     end
-
-    if not (_twopc_state is cp.TwoPCFsmStart) then
+    if _twopc_state is cp.TwoPCFsm2Abort then
+      // TODO I think that this is harmless, but double-check.
+      // We've done prepare_for_rollback before getting here.
+      // The next step is rollback().  Anything that we send to
+      // the sink is going to be undone.  Aside from the wasted
+      // effort, is there any harm done?  Is it worth the effort
+      // of trying to switch to NormalSinkMessageProcessor and
+      // sync _twopc_state=TwoPCFsmStart in only 1 behavior call?
+      // And can we do that without adding more bugs?
+      None
+    elseif not (_twopc_state is cp.TwoPCFsmStart) then
       @printf[I32]("2PC: ERROR: _twopc_state = %d\n".cstring(), _twopc_state())
       Fail()
     end
