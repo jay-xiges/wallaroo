@@ -231,7 +231,6 @@ class AsyncServer(asynchat.async_chat, object):
                 log_tag = '1-rollback'
             self.log_it([log_tag, msg2.txn_id, msg2.where_list])
 
-            print("CCCC: success {} close_before {} close_after {}".format(success, close_before, close_after))
             if close_before:
                 self.log_it(['close', 'before reply'])
                 self.close()
@@ -374,7 +373,6 @@ class AsyncServer(asynchat.async_chat, object):
 
     def log_it(self, log):
         log.insert(0, time.time())
-        print('LOG_IT: {}'.format(log))
         self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
         self.flush_fsync(self._txn_log)
 
