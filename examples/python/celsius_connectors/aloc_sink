@@ -171,7 +171,7 @@ class AsyncServer(asynchat.async_chat, object):
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
 
-            self.log_it([time.time(), 'list-uncommitted', uncommitted])
+            self.log_it(['list-uncommitted', uncommitted])
         elif isinstance(msg2, cwm.TwoPCPhase1):
             print('2PC: Phase 1 got {}'.format(msg2))
             print('2PC: Phase 1 txn_state = {}'.format(self._txn_state))
@@ -217,32 +217,33 @@ class AsyncServer(asynchat.async_chat, object):
                         except:
                             True
 
-            if close_before:
-                self.log_it(['close', 'before'])
-                self.close()
-                return
-
             self.flush_fsync(self._out)
             self.flush_fsync(self._txn_log)
-
             success = self._txn_commit_next
-            reply = cwm.TwoPCReply(str(msg2.txn_id).encode('utf-8'), success)
-            reply_bytes = cwm.TwoPCFrame.encode(reply)
-            msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
-            self.write(msg)
 
             self._txn_state[msg2.txn_id] = (success, msg2.where_list)
             if success:
                 log_tag = '1-ok'
             else:
                 log_tag = '1-rollback'
-            self.log_it([time.time(), log_tag, msg2.txn_id, msg2.where_list])
+            self.log_it([log_tag, msg2.txn_id, msg2.where_list])
+
+            print("CCCC: close_before {} close_after {}".format(close_before, close_after))
+            if close_before:
+                self.log_it(['close', 'before reply'])
+                self.close()
+                return
+
+            reply = cwm.TwoPCReply(str(msg2.txn_id).encode('utf-8'), success)
+            reply_bytes = cwm.TwoPCFrame.encode(reply)
+            msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
+            self.write(msg)
 
             self._txn_commit_next = True
             self._next_txn_force_abort_written = False
 
             if close_after:
-                self.log_it(['close', 'after'])
+                self.log_it(['close', 'after reply'])
                 self.close()
                 return
         elif isinstance(msg2, cwm.TwoPCReply):
@@ -276,13 +277,13 @@ class AsyncServer(asynchat.async_chat, object):
                 else:
                     log_tag = '2-rollback'
                     offset = where_list[0][1]
-                self.log_it([time.time(), log_tag, msg2.txn_id, offset])
+                self.log_it([log_tag, msg2.txn_id, offset])
 
                 del self._txn_state[msg2.txn_id]
                 print('2PC: Phase 2 txn_state = {}'.format(self._txn_state))
             else:
                 print('2PC: ERROR: Phase 2 got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
-                self.log_it([time.time(), '2-error', msg2.txn_id, msg2.commit])
+                self.log_it(['2-error', msg2.txn_id, msg2.commit])
             # No reply is required for Phase 2
         else:
             raise Exception("Stream ID 0 not implemented, msg2 = {}".format(msg2))
@@ -312,7 +313,7 @@ class AsyncServer(asynchat.async_chat, object):
                 if not self._next_txn_force_abort_written:
                     print(m)
                     self._next_txn_force_abort_written = True
-                    self.log_it([time.time(), 'next-txn-force-abort', m])
+                    self.log_it(['next-txn-force-abort', m])
             elif self._out_offset > msg.message_id:
                 print('ERROR: duplicate data: self._out_offset {} > msg.message_id {}'.format(self._out_offset, msg.message_id))
         else:
@@ -355,7 +356,7 @@ class AsyncServer(asynchat.async_chat, object):
             "\n\t".join("{}, {}: {}".format(sid, sn, mid)
                       for sid, sn, mid in self._streams.values())))
         super(AsyncServer, self).close()
-        self.log_it([time.time(), 'connection-closed', True])
+        self.log_it(['connection-closed', True])
         ### self._out.write(b'<DEBUG-ONLY-CONNECTION-CLOSED>\n')
 
     def flush_fsync(self, file):
@@ -369,6 +370,8 @@ class AsyncServer(asynchat.async_chat, object):
             sys.exit(66)
 
     def log_it(self, log):
+        log.insert(0, time.time())
+        print('LOG_IT: {}'.format(log))
         self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
         self.flush_fsync(self._txn_log)
 
