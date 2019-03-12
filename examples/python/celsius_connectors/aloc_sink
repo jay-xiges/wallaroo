@@ -171,9 +171,7 @@ class AsyncServer(asynchat.async_chat, object):
             msg = cwm.Message(0, cwm.Message.Ephemeral, None, None, None, reply_bytes)
             self.write(msg)
 
-            log = [time.time(), 'list-uncommitted', uncommitted]
-            self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
-            self.flush_fsync(self._txn_log)
+            self.log_it([time.time(), 'list-uncommitted', uncommitted])
         elif isinstance(msg2, cwm.TwoPCPhase1):
             print('2PC: Phase 1 got {}'.format(msg2))
             print('2PC: Phase 1 txn_state = {}'.format(self._txn_state))
@@ -195,17 +193,34 @@ class AsyncServer(asynchat.async_chat, object):
 
             # Check local debugging/testing abort rules
             self._txn_local_count += 1
+            close_before = False
+            close_after = False
             for r in self._abort_rules:
                 if r[0] == 'local-txn':
                     if self._txn_local_count == r[1]:
                         self._txn_commit_next = False
                         print('2PC: abort next transaction: local txn count {}'
                             .format(self._txn_local_count))
+                        try:
+                            close_before = r[2]
+                            close_after = r[3]
+                        except:
+                            True
                 elif r[0] == 'txnid-regexp':
                     if re.search(r[1], msg2.txn_id):
                         self._txn_commit_next = False
                         print('2PC: abort next transaction: regexp {} matches txn_id {}'
                             .format(r[1], msg2.txn_id))
+                        try:
+                            close_before = r[2]
+                            close_after = r[3]
+                        except:
+                            True
+
+            if close_before:
+                self.log_it(['close', 'before'])
+                self.close()
+                return
 
             self.flush_fsync(self._out)
             self.flush_fsync(self._txn_log)
@@ -221,12 +236,15 @@ class AsyncServer(asynchat.async_chat, object):
                 log_tag = '1-ok'
             else:
                 log_tag = '1-rollback'
-            log = [time.time(), log_tag, msg2.txn_id, msg2.where_list]
-            self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
-            self.flush_fsync(self._txn_log)
+            self.log_it([time.time(), log_tag, msg2.txn_id, msg2.where_list])
 
             self._txn_commit_next = True
             self._next_txn_force_abort_written = False
+
+            if close_after:
+                self.log_it(['close', 'after'])
+                self.close()
+                return
         elif isinstance(msg2, cwm.TwoPCReply):
             raise Exception("Bad stream ID 0 message: {}".format(msg2))
         elif isinstance(msg2, cwm.TwoPCPhase2):
@@ -258,17 +276,13 @@ class AsyncServer(asynchat.async_chat, object):
                 else:
                     log_tag = '2-rollback'
                     offset = where_list[0][1]
-                log = [time.time(), log_tag, msg2.txn_id, offset]
-                self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
-                self.flush_fsync(self._txn_log)
+                self.log_it([time.time(), log_tag, msg2.txn_id, offset])
 
                 del self._txn_state[msg2.txn_id]
                 print('2PC: Phase 2 txn_state = {}'.format(self._txn_state))
             else:
                 print('2PC: ERROR: Phase 2 got unknown txn_id {} commit {}'.format(msg2.txn_id, msg2.commit))
-                log = [time.time(), '2-error', msg2.txn_id, msg2.commit]
-                self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
-                self.flush_fsync(self._txn_log)
+                self.log_it([time.time(), '2-error', msg2.txn_id, msg2.commit])
             # No reply is required for Phase 2
         else:
             raise Exception("Stream ID 0 not implemented, msg2 = {}".format(msg2))
@@ -298,9 +312,7 @@ class AsyncServer(asynchat.async_chat, object):
                 if not self._next_txn_force_abort_written:
                     print(m)
                     self._next_txn_force_abort_written = True
-                    log = [time.time(), 'next-txn-force-abort', m]
-                    self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
-                    self.flush_fsync(self._txn_log)
+                    self.log_it([time.time(), 'next-txn-force-abort', m])
             elif self._out_offset > msg.message_id:
                 print('ERROR: duplicate data: self._out_offset {} > msg.message_id {}'.format(self._out_offset, msg.message_id))
         else:
@@ -328,7 +340,7 @@ class AsyncServer(asynchat.async_chat, object):
                     (sid, por) for sid, _, por in self._streams.values()])
             print('DBG: send ack msg: {}'.format(ack))
             self.write(ack)
-        if self.received_count % 200 == 0:
+        if self.received_count % 9999200 == 0:
             # send a restart every 200 messages
             print('PERIODIC RESTART, what could possibly go wrong?')
             self.write(cwm.Restart())
@@ -343,9 +355,7 @@ class AsyncServer(asynchat.async_chat, object):
             "\n\t".join("{}, {}: {}".format(sid, sn, mid)
                       for sid, sn, mid in self._streams.values())))
         super(AsyncServer, self).close()
-        log = [time.time(), 'connection-closed', True]
-        self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
-        self.flush_fsync(self._txn_log)
+        self.log_it([time.time(), 'connection-closed', True])
         ### self._out.write(b'<DEBUG-ONLY-CONNECTION-CLOSED>\n')
 
     def flush_fsync(self, file):
@@ -357,6 +367,10 @@ class AsyncServer(asynchat.async_chat, object):
         if x:
             print('FATAL ERROR: fsync failed: {}'.format(x))
             sys.exit(66)
+
+    def log_it(self, log):
+        self._txn_log.write(bytes("{}\n".format(log).encode('utf-8')))
+        self.flush_fsync(self._txn_log)
 
 class EchoServer(asyncore.dispatcher):
 
