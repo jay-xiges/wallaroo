@@ -69,6 +69,7 @@ class AsyncServer(asynchat.async_chat, object):
         self._streams = {} if streams is None else streams
         self.received_count = 0
         self._reset_count = {}
+        self._using_2pc = True
         self._txn_state = {}
         self._txn_stream_content = []
         self._txn_local_count = 0
@@ -319,12 +320,13 @@ class AsyncServer(asynchat.async_chat, object):
 
     def update_received_count(self):
         self.received_count += 1
-        if self.received_count % 100 == 0:
+        if (not self._using_2pc) and self.received_count % 3 == 0:
             print("Sending ack for streams!")
             ack = cwm.Ack(
                 credits = 10,
                 acks = [
                     (sid, por) for sid, _, por in self._streams.values()])
+            print('DBG: send ack msg: {}'.format(ack))
             self.write(ack)
         if self.received_count % 200 == 0:
             # send a restart every 200 messages

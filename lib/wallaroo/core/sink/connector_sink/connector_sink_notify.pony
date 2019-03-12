@@ -301,11 +301,38 @@ class ConnectorSinkNotify
         credits = credits + m.credits
         for (s_id, p_o_r) in m.credit_list.values() do
           if s_id == _stream_id then
-            if p_o_r < acked_point_of_ref then
+            if p_o_r > message_id then
+              // This is possible with 2PC, but it's harmless if
+              // we recognize it and ignore it.
+              // 0. The connector sink's p_o_r is 4000.
+              // 1. The connector sink sends phase1=abort.
+              // 2. We send phase2=abort.
+              // 3. The connector sink decides to send an ACK with p_o_r=4000.
+              //    This message is delayed just a little bit to make a race.
+              // 4. We process prepare_to_rollback & rollback.  Our
+              //    message_id is reset to message_id=0.  Wallaroo
+              //    has fully rolled back state and is ready to resume
+              //    all of its work from offset=0.
+              // 5. The ACK from step #3 arrives.
+              //    4000 > 0, which looks like a terrible state:
+              //    we haven't sent anything, but the sink is ACKing
+              //    4000 bytes.
+              //
+              // I am going to disable unsolicited ACK'ing by the
+              // connector sink.  Disabling unsolicited ACKs would
+              // definitely prevent late-arriving ACKs.  (Will still
+              // send ACK in response to Eos.)
+              // TODO: Otherwise I believe we'd have to
+              // add a checkpoint #/rollback #/state-something to
+              // the ACK message to be able to identify late-arriving
+              // ACKs.
+              None
+            elseif p_o_r < acked_point_of_ref then
               @printf[I32]("Error: Ack: stream-id %lu p_o_r %lu acked_point_of_ref %lu\n".cstring(), _stream_id, p_o_r, acked_point_of_ref)
               Fail()
+            else
+              acked_point_of_ref = p_o_r
             end
-            acked_point_of_ref = p_o_r
           else
             @printf[I32]("Ack: unknown stream_id %d\n".cstring(), s_id)
             Fail()
