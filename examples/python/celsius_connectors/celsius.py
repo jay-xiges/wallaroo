@@ -18,7 +18,6 @@ Celsius value and sends out a floating point Fahrenheit value.
 """
 
 import struct
-
 import wallaroo
 import wallaroo.experimental
 
