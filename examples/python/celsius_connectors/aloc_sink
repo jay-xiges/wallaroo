@@ -66,6 +66,14 @@ def look_for_forced_abort(path):
     except FileNotFoundError:
         return False
 
+def read_chunk(path, start_offset, end_offset):
+    try:
+        with open(path, 'rb') as f:
+            f.seek(start_offset)
+            return f.read(end_offset - start_offset)
+    except FileNotFoundError as e:
+        raise e
+
 class AsyncServer(asynchat.async_chat, object):
     def __init__(self, handler_id, sock, out_path, abort_rule_path, s3_scheme, s3_bucket, s3_prefix, streams=None):
         print("AsyncServer.__init__", handler_id, sock)
@@ -100,14 +108,16 @@ class AsyncServer(asynchat.async_chat, object):
             self._s3 = boto3.resource('s3')
         else:
             self._s3 = None
-        print('self._s3 = {}'.format(self._s3))
+        self._s3_chunk = b''
 
         self._s3_bucket = s3_bucket
         self._s3_prefix = s3_prefix
 
         if self._s3 is not None:
             try:
-                self._s3.create_bucket(Bucket=self._s3_bucket)
+                print('S3: _s3 = {}'.format(self._s3))
+                self._s3 = self._s3.create_bucket(Bucket=self._s3_bucket)
+                print('S3: _s3 = {}'.format(self._s3))
             except Exception as e:
                 print('FATAL ERROR: {}'.format(e)); sys.exit(66)
 
@@ -217,6 +227,7 @@ class AsyncServer(asynchat.async_chat, object):
             print('2PC: Phase 1 txn_state = {}'.format(self._txn_state))
 
             # Sanity checks
+            start_por = -1
             for (stream_id, start_por, end_por) in msg2.where_list:
                 if stream_id != 1:
                     self._txn_commit_next = False
@@ -262,6 +273,11 @@ class AsyncServer(asynchat.async_chat, object):
             self.flush_fsync(self._out)
             self.flush_fsync(self._txn_log)
             success = self._txn_commit_next
+            if success and (self._s3 is not None) and start_por >= 0:
+                chunk = read_chunk(self._out_path, start_por, end_por)
+                # print('S3: offset {} to {} len(chunk) = {}'.format(start_por, end_por, len(chunk)))
+                self._s3_chunk = chunk
+                self._s3_chunk_offset = start_por
 
             self._txn_state[msg2.txn_id] = (success, msg2.where_list)
             if success:
@@ -312,6 +328,15 @@ class AsyncServer(asynchat.async_chat, object):
                     print('2PC: mute/unmute placeholder 2 @ aloc_sink')
                     sys.exit(66)
 
+                if msg2.commit and phase1_status and \
+                   (self._s3 is not None) and (self._s3_chunk != b''):
+                        name = '%s%010d' % (self._s3_prefix, self._s3_chunk_offset)
+                        x = self._s3.put_object(
+                            ACL='private',
+                            Body=self._s3_chunk,
+                            Bucket=self._s3_bucket,
+                            Key=name)
+                        print('S3: put res = {}'.format(x))
                 if msg2.commit and phase1_status:
                     log_tag = '2-ok'
                     offset = where_list[0][2]
