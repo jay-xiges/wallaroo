@@ -92,9 +92,24 @@ class AsyncServer(asynchat.async_chat, object):
         self._txn_stream_content = []
         self._txn_local_count = 0
         self._next_txn_force_abort_written = False
-        self.s3_scheme = s3_scheme
-        self.s3_bucket = s3_bucket
-        self.s3_prefix = s3_prefix
+        if s3_scheme == 'fake-s3':
+            self._s3 = boto3.resource('s3', endpoint_url='http://localhost:4569',
+                    aws_access_key_id='fakeid', aws_secret_access_key='fakekey')
+        elif s3_scheme == 's3':
+            # Rely on environment vars AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+            self._s3 = boto3.resource('s3')
+        else:
+            self._s3 = None
+        print('self._s3 = {}'.format(self._s3))
+
+        self._s3_bucket = s3_bucket
+        self._s3_prefix = s3_prefix
+
+        if self._s3 is not None:
+            try:
+                self._s3.create_bucket(Bucket=self._s3_bucket)
+            except Exception as e:
+                print('FATAL ERROR: {}'.format(e)); sys.exit(66)
 
         self._abort_rules = parse_abort_rules(self._abort_rule_path)
         for t in self._abort_rules:
