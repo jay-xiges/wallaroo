@@ -121,7 +121,7 @@ class BarrierStepForwarder
     if _inputs_blocking.contains(input_id) then
       try _inputs_blocking.remove(input_id)? else Unreachable() end
     end
-    @printf[I32]("[JB] Calling check_completion from remove_input with id: %s\n".cstring(), input_id.string().cstring())
+    @printf[I32]("[JB] Calling check_completion from remove_input with id: %s _step.inputs() size: %s\n".cstring(), input_id.string().cstring(), _step.inputs().size().string().cstring())
     check_completion(_step.inputs())
 
   fun ref check_completion(inputs: Map[RoutingId, Producer] box) =>
@@ -143,6 +143,12 @@ class BarrierStepForwarder
       @printf[I32]("%s, ".cstring(), input.string().cstring())
     end
     @printf[I32]("\n".cstring())
+    @printf[I32]("[JB] check_completion step inputs: ".cstring())
+    for input in _step.inputs().keys() do
+      @printf[I32]("%s, ".cstring(), input.string().cstring())
+    end
+    @printf[I32]("\n".cstring())
+
     if inputs.size() == _inputs_blocking.size()
     then
       for (o_id, o) in _step.outputs().pairs() do

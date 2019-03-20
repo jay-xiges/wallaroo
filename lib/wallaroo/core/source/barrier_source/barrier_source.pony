@@ -82,6 +82,8 @@ actor BarrierSource is Source
     _event_log = event_log
     _metrics_reporter = consume metrics_reporter'
     _router_registry.register_producer(this)
+    @printf[I32]("[JB] BarrierSource ID: %s\n".cstring(),
+    _source_id.string().cstring())
 
   be first_checkpoint_complete() =>
     None
@@ -100,6 +102,8 @@ actor BarrierSource is Source
     one Source. That's because we need to be able to forward barriers to
     everything a Source for that source would forward to on this worker.
     """
+    @printf[I32]("[JB]BarrierSource registering source: %s\n".cstring(),
+      source_name.cstring())
     let s_identifier = _SourceIdentifierCreator(router')
     try
       _source_outputs.insert_if_absent(source_name, Map[RoutingId, Consumer])?
@@ -162,6 +166,8 @@ actor BarrierSource is Source
     None
 
   fun ref _register_output(source: String, id: RoutingId, c: Consumer) =>
+    @printf[I32]("[JB]BarrierSource _register_output for source: %s with id: %s\n".cstring(),
+      source.cstring(), id.string().cstring())
     try
       if _source_outputs(source)?.contains(id) then
         try
@@ -177,9 +183,14 @@ actor BarrierSource is Source
       end
 
       _source_outputs(source)?(id) = c
+      try
+        let outputs_size = _source_outputs(source)?.size()
+        @printf[I32]("[JB]BarrierSource _source_outputs size for source %s: %s\n".cstring(), source.cstring(), outputs_size.string().cstring())
+      end
       _outputs(id) = c
       match c
       | let ob: OutgoingBoundary =>
+        @printf[I32]("[JB]Forwarding register producer with id: %s\n".cstring(), id.string().cstring())
         ob.forward_register_producer(_source_id, id, this)
       else
         c.register_producer(_source_id, this)
@@ -193,30 +204,49 @@ actor BarrierSource is Source
     This method should only be called if we are removing this source from the
     active graph (or on dispose())
     """
+    @printf[I32]("[JB]BarrierSource _unregister_all_outputs for: %s sources\n".cstring(), _source_outputs.size().string().cstring())
     for (source, outputs) in _source_outputs.pairs() do
+      @printf[I32]("[JB]BarrierSource _unregister_outputs for: %s outputs\n".cstring(), outputs.size().string().cstring())
+      let outputs_to_remove = Array[RoutingId]()
       for (id, consumer) in outputs.pairs() do
         _unregister_output(source, id, consumer)
+        outputs_to_remove.push(id)
+      end
+      try
+        for id in outputs_to_remove.values() do
+          @printf[I32]("[JB]BarrierSource safely removing output: %s\n".cstring(), id.string().cstring())
+          outputs.remove(id)?
+        end
+      else
+        Fail()
       end
     end
 
+  // fun ref _remove_output(source: String, id: RoutingId, c: Consumer,
+  //   outputs_to_remove: Array[RoutingId]) =>
+  //   try
+  //     _source_outputs(source)?.remove(id)?
+  //     var last_one = true
+  //     for (p, outputs) in _source_outputs.pairs() do
+  //       if outputs.contains(id) then last_one = false end
+  //     end
+  //     if last_one then
+  //       outputs_to_remove.push(id)
+  //     end
+  //   else
+  //     Fail()
+  //   end
+
   fun ref _unregister_output(source: String, id: RoutingId, c: Consumer) =>
-    try
-      _source_outputs(source)?.remove(id)?
-      match c
-      | let ob: OutgoingBoundary =>
-        ob.forward_unregister_producer(_source_id, id, this)
-      else
-        c.unregister_producer(_source_id, this)
-      end
-      var last_one = true
-      for (p, outputs) in _source_outputs.pairs() do
-        if outputs.contains(id) then last_one = false end
-      end
-      if last_one then
-        _outputs.remove(id)?
-      end
+    @printf[I32]("[JB]BarrierSource _unregister_output for source: %s with id: %s\n".cstring(),
+      source.cstring(), id.string().cstring())
+    match c
+    | let ob: OutgoingBoundary =>
+      @printf[I32]("[JB]BarrierSource forwarding unregister producer to: %s with id: %s\n".cstring(), source.cstring(), id.string().cstring())
+      ob.forward_unregister_producer(_source_id, id, this)
     else
-      Fail()
+      @printf[I32]("[JB]BarrierSource calling unregister producer on consumer with id: %s\n".cstring(), _source_id.string().cstring())
+      c.unregister_producer(_source_id, this)
     end
 
   be register_downstream() =>

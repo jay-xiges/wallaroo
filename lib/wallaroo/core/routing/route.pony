@@ -83,6 +83,7 @@ primitive Route
   =>
     match consumer
     | let ob: OutgoingBoundary =>
+      @printf[I32]("[JB] Forwarding unregister producer for id: %s\n".cstring(), producer_id.string().cstring())
       ob.forward_unregister_producer(producer_id, target_id, producer)
     else
       consumer.unregister_producer(producer_id, producer)
