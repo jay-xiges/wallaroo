@@ -735,7 +735,9 @@ actor RouterRegistry
     _stop_the_world()
 
   fun ref _try_resume_the_world() =>
+    @printf[I32]("!@ _try_resume_the_world\n".cstring())
     if _initiated_stop_the_world then
+      @printf[I32]("!@ -- _try_resume_the_world <-- _initiated_stop_the_world\n".cstring())
       let promise = Promise[None]
       promise.next[None]({(_: None) => _self.initiate_autoscale_complete()})
       _autoscale_initiator.initiate_autoscale_resume_acks(promise)
@@ -768,10 +770,18 @@ actor RouterRegistry
     _unmute_request(originating_worker)
 
   fun ref _unmute_request(originating_worker: WorkerName) =>
+    @printf[I32]("!@ !!!! Received _unmute_request from %s\n".cstring(), originating_worker.cstring())
     if _stopped_worker_waiting_list.size() > 0 then
       _stopped_worker_waiting_list.unset(originating_worker)
       if (_stopped_worker_waiting_list.size() == 0) then
         _try_resume_the_world()
+      //!@
+      else
+        @printf[I32]("!@ -- Still waiting for:\n".cstring())
+        //!@
+        for w in _stopped_worker_waiting_list.values() do
+          @printf[I32]("!@ -- -- %s\n".cstring(), w.cstring())
+        end
       end
     end
 

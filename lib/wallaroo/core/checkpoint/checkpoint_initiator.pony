@@ -170,7 +170,7 @@ actor CheckpointInitiator is Initializable
     p((_last_complete_checkpoint_id, _last_rollback_id))
 
   be initiate_checkpoint(checkpoint_group: USize) =>
-    @printf[I32]("[JB]CheckpointInitiator: initiate_checkpoint\n".cstring())
+    // @printf[I32]("[JB]CheckpointInitiator: initiate_checkpoint\n".cstring())
     _initiate_checkpoint(checkpoint_group)
 
   be clear_pending_checkpoints(promise: Promise[None]) =>
