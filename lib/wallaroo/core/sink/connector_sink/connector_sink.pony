@@ -638,6 +638,7 @@ actor ConnectorSink is Sink
       _clear_barriers()
     | let rbrt: CheckpointRollbackResumeBarrierToken =>
       _resume_processing_messages()
+      _reset_2pc_state()
     end
 
   be checkpoint_complete(checkpoint_id: CheckpointId) =>
