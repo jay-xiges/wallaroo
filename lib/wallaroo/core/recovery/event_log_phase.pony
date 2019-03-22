@@ -92,6 +92,7 @@ class _InitialEventLogPhase is _EventLogPhase
   fun ref initiate_checkpoint(checkpoint_id: CheckpointId,
     promise: Promise[CheckpointId], event_log: EventLog ref)
   =>
+    @printf[I32]("[JB]_InitialEventLogPhase.initiate_checkpoint\n".cstring())
     event_log._initiate_checkpoint(checkpoint_id, promise)
 
 class _WaitingForCheckpointInitiationEventLogPhase is _EventLogPhase
@@ -117,6 +118,7 @@ class _WaitingForCheckpointInitiationEventLogPhase is _EventLogPhase
   fun ref initiate_checkpoint(checkpoint_id: CheckpointId,
     promise: Promise[CheckpointId], event_log: EventLog ref)
   =>
+    @printf[I32]("[JB]_WaitingForCheckpointInitiationEventLogPhase.initiate_checkpoint\n".cstring())
     try
       let pending = _pending_checkpoint_states.insert_if_absent(checkpoint_id,
         Array[_QueuedCheckpointState])?
@@ -318,6 +320,7 @@ class _DisposedEventLogPhase is _EventLogPhase
   fun ref initiate_checkpoint(checkpoint_id: CheckpointId,
     promise: Promise[CheckpointId], event_log: EventLog ref)
   =>
+    @printf[I32]("[JB]_DisposedEventLogPhase.initiate_checkpoint\n".cstring())
     None
 
   fun ref checkpoint_state(resilient_id: RoutingId,

@@ -365,7 +365,7 @@ actor Step is (Producer & Consumer & BarrierProcessor)
     _upstreams.set(producer)
 
   be unregister_producer(id: RoutingId, producer: Producer) =>
-    @printf[I32]("[JB] Calling Step.unregister_producer for id: %s\n".cstring(), id.string().cstring())
+    // @printf[I32]("[JB] Calling Step.unregister_producer for id: %s\n".cstring(), id.string().cstring())
     if _inputs.contains(id) then
       try
         _inputs.remove(id)?
@@ -373,7 +373,7 @@ actor Step is (Producer & Consumer & BarrierProcessor)
       try
         let b_forwarder = _barrier_forwarder as BarrierStepForwarder
         if b_forwarder.barrier_in_progress() then
-        @printf[I32]("[JB] Calling remove_input from Steps.unregister_producer\n".cstring())
+        // @printf[I32]("[JB] Calling remove_input from Steps.unregister_producer\n".cstring())
           b_forwarder.remove_input(id)
         end
       else Fail() end

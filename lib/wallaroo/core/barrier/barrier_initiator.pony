@@ -213,13 +213,12 @@ actor BarrierInitiator is Initializable
           end
         end
 
-        @printf[I32]("[JB]Phase name: %s\n".cstring(), _phase.name().cstring())
+        // @printf[I32]("[JB]Phase name: %s\n".cstring(), _phase.name().cstring())
         _phase.initiate_barrier(barrier_token, result_promise)
       else
         _pending_promises(barrier_token) = result_promise
         try
-          @printf[I32]("[JB]BarrierInitiator forwarding inject barrier to: %s for token: %s\n".cstring(), _primary_worker.cstring(),
-            barrier_token.string().cstring())
+          // @printf[I32]("[JB]BarrierInitiator forwarding inject barrier to: %s for token: %s\n".cstring(), _primary_worker.cstring(), barrier_token.string().cstring())
           let msg = ChannelMsgEncoder.forward_inject_barrier(barrier_token,
             _worker_name, _auth)?
           _connections.send_control(_primary_worker, msg)
@@ -541,15 +540,15 @@ actor BarrierInitiator is Initializable
   fun ref barrier_complete(barrier_token: BarrierToken,
     result_promise: BarrierResultPromise)
   =>
-    @printf[I32]("[JB] Calling barrier_complete on BarrierInitiator for token: %s\n".cstring(), barrier_token.string().cstring())
+    // @printf[I32]("[JB] Calling barrier_complete on BarrierInitiator for token: %s\n".cstring(), barrier_token.string().cstring())
     if not _disposed then
-      @printf[I32]("[JB] Calling barrier_complete (not _disposed) on BarrierInitiator for token: %s\n".cstring(), barrier_token.string().cstring())
+      // @printf[I32]("[JB] Calling barrier_complete (not _disposed) on BarrierInitiator for token: %s\n".cstring(), barrier_token.string().cstring())
       result_promise(barrier_token)
       try
         let msg = ChannelMsgEncoder.barrier_complete(barrier_token, _auth)?
         for w in _workers.values() do
           if w != _worker_name then
-            @printf[I32]("[JB] Sending barrier_complete to worker: %s for token: %s\n".cstring(), w.cstring(), barrier_token.string().cstring())
+            // @printf[I32]("[JB] Sending barrier_complete to worker: %s for token: %s\n".cstring(), w.cstring(), barrier_token.string().cstring())
             _connections.send_control(w, msg)
           end
         end
@@ -558,11 +557,11 @@ actor BarrierInitiator is Initializable
       end
 
       for b_source in _barrier_sources.values() do
-        @printf[I32]("[JB] Calling barrier_complete on BarrierSource for token: %s\n".cstring(), barrier_token.string().cstring())
+        // @printf[I32]("[JB] Calling barrier_complete on BarrierSource for token: %s\n".cstring(), barrier_token.string().cstring())
         b_source.barrier_complete(barrier_token)
       end
       for s in _sources.values() do
-        @printf[I32]("[JB] Calling barrier_complete on Source for token: %s\n".cstring(), barrier_token.string().cstring())
+        // @printf[I32]("[JB] Calling barrier_complete on Source for token: %s\n".cstring(), barrier_token.string().cstring())
         s.barrier_complete(barrier_token)
       end
 
@@ -577,12 +576,15 @@ actor BarrierInitiator is Initializable
           let next = _pending.shift()?
           match next
           | let p: _PendingSourceInit =>
+            @printf[I32]("[JB]BarrierInitiator next token: _PendingSourceInit\n".cstring())
             _phase = _SourcePendingBarrierInitiatorPhase(this)
+            @printf[I32]("[JB]BarrierInitiator phase: _SourcePendingBarrierInitiatorPhase\n".cstring())
             let promise = Promise[Source]
             promise.next[None](recover this~source_registration_complete() end)
             p.source.register_downstreams(promise)
             return
           | let p: _PendingBarrier =>
+            @printf[I32]("[JB]BarrierInitiator next token: _PendingBarrier\n".cstring())
             _inject_barrier(p.token, p.promise)
             if (_phase.ready_for_next_token() and (_pending.size() > 0))
             then
@@ -601,7 +603,7 @@ actor BarrierInitiator is Initializable
     message that this barrier is complete. We can now inform all local
     sources (for example, so they can ack messages up to a checkpoint).
     """
-    @printf[I32]("[JB]BarrierInitiator remote_barrier_complete: %s\n".cstring(), barrier_token.string().cstring())
+    // @printf[I32]("[JB]BarrierInitiator remote_barrier_complete: %s\n".cstring(), barrier_token.string().cstring())
     for s in _sources.values() do
       s.barrier_complete(barrier_token)
     end

@@ -524,8 +524,7 @@ class GlobalConnectorStreamRegistry[In: Any val]
   =>
     @printf[I32]("GlobalConnectorStreamRegistry beginning shrink.\n"
       .cstring())
-    @printf[I32]("[JB] Global leaving: %s streams_to_shrink: %s active: %s inactive: %s.\n"
-      .cstring(), leaving.size().string().cstring(), streams_to_shrink.size().string().cstring(), _active_streams.size().string().cstring(), _inactive_streams.size().string().cstring())
+    @printf[I32]("[JB] Global leaving: %s streams_to_shrink: %s active: %s inactive: %s.\n".cstring(), leaving.size().string().cstring(), streams_to_shrink.size().string().cstring(), _active_streams.size().string().cstring(), _inactive_streams.size().string().cstring())
 
     if leaving.contains(_worker_name, {(l, r) => l == r}) then
       _is_shrinking = true

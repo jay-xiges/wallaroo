@@ -138,6 +138,7 @@ actor CheckpointInitiator is Initializable
     initializer.report_ready_to_work(this)
 
   be application_ready_to_work(initializer: LocalTopologyInitializer) =>
+    @printf[I32]("[JB]application_ready_to_work\n".cstring())
     ifdef "resilience" then
       if _is_active and (_worker_name == _primary_worker) then
         let t = Timer(_InitiateCheckpoint(this, _checkpoint_group),
@@ -185,42 +186,53 @@ actor CheckpointInitiator is Initializable
   fun ref _initiate_checkpoint(checkpoint_group: USize,
     repeating: Bool = true)
   =>
+    @printf[I32]("[JB]CheckpointInitiator _initiate_checkpoint in phase: %s\n".cstring(), _phase.name().cstring())
     ifdef "resilience" then
-      if not _ignoring_checkpoints and (checkpoint_group == _checkpoint_group)
-      then
-        _clear_pending_checkpoints()
-        _current_checkpoint_id = _current_checkpoint_id + 1
+      match _phase
+      | let p: _CheckpointingPhase =>
+        // We are currently checkpointing, therefore we shouldn't start another
+        // This is possible when a pending checkpoint is started and then a
+        // autoscale barrier is completed and
+        // `restart_repeating_checkpoints()` is called
+        return
+      | let p: _WaitingCheckpointInitiatorPhase =>
+        if not _ignoring_checkpoints and (checkpoint_group == _checkpoint_group)
+        then
+          _clear_pending_checkpoints()
+          _current_checkpoint_id = _current_checkpoint_id + 1
 
-        ifdef "checkpoint_trace" then
-          (let s, let ns) = Time.now()
-          let us = ns / 1000
-          let ts = PosixDate(s, ns).format("%Y-%m-%d %H:%M:%S." + us.string())
-          @printf[I32]("Initiating checkpoint %s at %s\n".cstring(),
-            _current_checkpoint_id.string().cstring(), ts.string().cstring())
+          ifdef "checkpoint_trace" then
+            (let s, let ns) = Time.now()
+            let us = ns / 1000
+            let ts = PosixDate(s, ns).format("%Y-%m-%d %H:%M:%S." + us.string())
+            @printf[I32]("Initiating checkpoint %s at %s\n".cstring(),
+              _current_checkpoint_id.string().cstring(), ts.string().cstring())
+          end
+
+          let event_log_promise = Promise[CheckpointId]
+          event_log_promise.next[None](
+            recover this~event_log_checkpoint_complete(_worker_name) end)
+          // TODO [source-migration]: this is where we fail
+          _event_log.initiate_checkpoint(_current_checkpoint_id,
+            event_log_promise)
+
+          try
+            let msg = ChannelMsgEncoder.event_log_initiate_checkpoint(
+              _current_checkpoint_id, _worker_name, _auth)?
+            _connections.send_control_to_cluster(msg)
+          else
+            Fail()
+          end
+
+          let token = CheckpointBarrierToken(_current_checkpoint_id)
+
+          let barrier_promise = Promise[BarrierToken]
+          barrier_promise.next[None](
+            recover this~checkpoint_barrier_complete() end)
+          _barrier_initiator.inject_barrier(token, barrier_promise)
+
+          _phase = _CheckpointingPhase(token, repeating, this)
         end
-
-        let event_log_promise = Promise[CheckpointId]
-        event_log_promise.next[None](
-          recover this~event_log_checkpoint_complete(_worker_name) end)
-        _event_log.initiate_checkpoint(_current_checkpoint_id,
-          event_log_promise)
-
-        try
-          let msg = ChannelMsgEncoder.event_log_initiate_checkpoint(
-            _current_checkpoint_id, _worker_name, _auth)?
-          _connections.send_control_to_cluster(msg)
-        else
-          Fail()
-        end
-
-        let token = CheckpointBarrierToken(_current_checkpoint_id)
-
-        let barrier_promise = Promise[BarrierToken]
-        barrier_promise.next[None](
-          recover this~checkpoint_barrier_complete() end)
-        _barrier_initiator.inject_barrier(token, barrier_promise)
-
-        _phase = _CheckpointingPhase(token, repeating, this)
       end
     end
 
@@ -313,6 +325,7 @@ actor CheckpointInitiator is Initializable
     _phase = _WaitingForEventLogIdWrittenPhase(token, repeating, this)
 
   fun ref checkpoint_complete(token: BarrierToken, repeating: Bool) =>
+    @printf[I32]("[JB]CheckpointInitiator calling checkpoint_complete for token: %s\n".cstring(), token.string().cstring())
     if not _ignoring_checkpoints and not _disposed then
       ifdef "resilience" then
         match token
@@ -518,5 +531,6 @@ class _InitiateCheckpoint is TimerNotify
     _checkpoint_group = checkpoint_group
 
   fun ref apply(timer: Timer, count: U64): Bool =>
+    @printf[I32]("[JB]Timer initiate_checkpoint\n".cstring())
     _si.initiate_checkpoint(_checkpoint_group)
     false
