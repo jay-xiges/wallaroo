@@ -293,7 +293,7 @@ class ConnectorSourceNotify[In: Any val]
 
     try
       let data': Array[U8] val = consume data
-      ifdef "trace" then
+      ifdef debug then 
         @printf[I32]("TRACE: decode data: %s\n".cstring(), _print_array[U8](data').cstring())
       end
       let connector_msg = cwm.Frame.decode(consume data')?
@@ -710,6 +710,7 @@ class ConnectorSourceNotify[In: Any val]
     w.done()
 
   fun ref prepare_for_rollback() =>
+  ifdef debug then @printf[I32]("prepare_for_rollback\n".cstring()) end
     if _session_active then
       _clear_streams()
       _prep_for_rollback = true
@@ -737,6 +738,8 @@ class ConnectorSourceNotify[In: Any val]
     rollback_complete(checkpoint_id)
 
   fun ref rollback_complete(checkpoint_id: CheckpointId) =>
+    @printf[I32]("rollback_complete(%s)\n".cstring(),
+      checkpoint_id.string().cstring())
     _prep_for_rollback = false
     send_restart()
 
@@ -862,7 +865,19 @@ class ConnectorSourceNotify[In: Any val]
   fun ref stream_notify_result(session_id: RoutingId, success: Bool,
     stream: StreamTuple)
   =>
+    ifdef debug then
+      @printf[I32]("%s ::: stream_notify_result(%s, %s, StreamTuple(%s, %s, %s))\n".cstring(),
+        WallClock.seconds().string().cstring(),
+        session_id.string().cstring(),
+        success.string().cstring(),
+        stream.id.string().cstring(),
+        stream.name.cstring(),
+        stream.last_acked.string().cstring())
+    end
     if (session_id != _session_id) or (not _session_active) then
+      ifdef debug then
+        @printf[I32]("Notify request session_id is old. Rejecting result\n"
+          .cstring())
       // This is a reply from a query that we'd sent in a prior TCP
       // connection, or else the TCP connection is closed now,
       // so ignore it.
@@ -930,6 +945,8 @@ class ConnectorSourceNotify[In: Any val]
       @printf[I32]("TRACE: %s.%s()\n".cstring(),
         __loc.type_name().cstring(), __loc.method_name().cstring())
     end
+    @printf[I32]("Attempting to send Restart(%s) to connector.\n".cstring(),
+      (host + ":" + service).cstring())
     _send_reply(_connector_source, cwm.RestartMsg(host + ":" + service))
     try (_connector_source as ConnectorSource[In] ref).close() end
     // The .close() method ^^^ calls our closed() method which will
