@@ -223,6 +223,9 @@ actor ConnectorSourceListener[In: Any val] is SourceListener
       _notify_listening()
     end
 
+    for (source_id, s) in _available_sources.values() do
+      s.unmute(this)
+    end
     for (source_id, s) in _connected_sources.values() do
       s.unmute(this)
     end
