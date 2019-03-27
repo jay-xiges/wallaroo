@@ -259,7 +259,6 @@ class MultiSourceConnector(AtLeastOnceSourceConnector, BaseIter):
 
     # Make this class an iterable:
     def __next__(self):
-        time.sleep(0.02)
         if len(self.keys) > 0:
             # get next position
             self._idx = (self._idx + 1) % len(self.keys)
