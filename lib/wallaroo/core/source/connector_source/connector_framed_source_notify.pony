@@ -878,6 +878,7 @@ class ConnectorSourceNotify[In: Any val]
       ifdef debug then
         @printf[I32]("Notify request session_id is old. Rejecting result\n"
           .cstring())
+      end
       // This is a reply from a query that we'd sent in a prior TCP
       // connection, or else the TCP connection is closed now,
       // so ignore it.
@@ -900,7 +901,7 @@ class ConnectorSourceNotify[In: Any val]
   fun ref send_notify_ack(success: Bool, stream_id: StreamId,
     point_of_reference: PointOfReference)
   =>
-    ifdef "trace" then
+    ifdef debug then
       @printf[I32]("%s ::: send_notify_ack(%s, %s, %s)\n".cstring(),
         WallClock.seconds().string().cstring(), success.string().cstring(),
         stream_id.string().cstring(), point_of_reference.string().cstring())
@@ -955,12 +956,18 @@ class ConnectorSourceNotify[In: Any val]
   // TODO [post-source-migration]: why pass source here instead of using
   // var _connector_source?
   fun _send_reply(source: (ConnectorSource[In] ref|None), msg: cwm.Message) =>
+    ifdef debug then
+      @printf[I32]("_send_reply\n".cstring())
+    end
     match source
     | let s: ConnectorSource[In] ref =>
       // write the frame data and length encode it
       let w1: Writer = w1.create()
       let b1 = cwm.Frame.encode(msg, w1)
       s.writev_final(Bytes.length_encode(b1))
+      ifdef debug then
+        @printf[I32]("_send_reply done\n".cstring())
+      end
     else
       Fail()
     end
