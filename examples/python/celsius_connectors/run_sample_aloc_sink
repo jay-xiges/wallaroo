@@ -137,5 +137,5 @@ signal.signal(signal.SIGINT, terminate)
 signal.signal(signal.SIGTERM, terminate)
 
 #send_feed() ## hack
-time.sleep(9.0)
+time.sleep(19.0)
 terminate()
