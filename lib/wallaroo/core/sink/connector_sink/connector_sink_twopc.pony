@@ -114,8 +114,16 @@ class ConnectorSink2PC
     if (not ((state_is_2commit()) or
              (state_is_2commit_fast())))
     then
-      @printf[I32]("2PC: DBG: _twopc.state = %s,\n".cstring(), state().string().cstring())
-      Fail()
+      if state_is_start() then
+        // If the connector sink disconnects immediately after we've
+        // decided that the checkpoint will commit, then the disconnect
+        // will call reset_state().  When the rest of Wallaroo's events
+        // catch up, we'll be in this case, which is ok.
+        None
+      else
+        @printf[I32]("2PC: DBG: _twopc.state = %s,\n".cstring(), state().string().cstring())
+        Fail()
+      end
     end
 
     if state_is_2commit() then
