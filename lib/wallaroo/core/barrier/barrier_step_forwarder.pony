@@ -127,7 +127,7 @@ class BarrierStepForwarder
       _step.barrier_complete(b_token)
     end
     @printf[I32]("!@ -- Remaining ids: \n".cstring())
-    for i in inputs.values() do
+    for i in inputs.keys() do
       if not _inputs_blocking.contains(i) then
         @printf[I32]("%s, \n".cstring(), i.string().cstring())
       end
