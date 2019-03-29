@@ -293,7 +293,7 @@ class ConnectorSourceNotify[In: Any val]
 
     try
       let data': Array[U8] val = consume data
-      ifdef debug then 
+      ifdef "trace" then
         @printf[I32]("TRACE: decode data: %s\n".cstring(), _print_array[U8](data').cstring())
       end
       let connector_msg = cwm.Frame.decode(consume data')?
@@ -710,7 +710,6 @@ class ConnectorSourceNotify[In: Any val]
     w.done()
 
   fun ref prepare_for_rollback() =>
-  ifdef debug then @printf[I32]("prepare_for_rollback\n".cstring()) end
     if _session_active then
       _clear_streams()
       _prep_for_rollback = true
@@ -738,8 +737,6 @@ class ConnectorSourceNotify[In: Any val]
     rollback_complete(checkpoint_id)
 
   fun ref rollback_complete(checkpoint_id: CheckpointId) =>
-    @printf[I32]("rollback_complete(%s)\n".cstring(),
-      checkpoint_id.string().cstring())
     _prep_for_rollback = false
     send_restart()
 
@@ -865,7 +862,7 @@ class ConnectorSourceNotify[In: Any val]
   fun ref stream_notify_result(session_id: RoutingId, success: Bool,
     stream: StreamTuple)
   =>
-    ifdef debug then
+    ifdef "trace" then
       @printf[I32]("%s ::: stream_notify_result(%s, %s, StreamTuple(%s, %s, %s))\n".cstring(),
         WallClock.seconds().string().cstring(),
         session_id.string().cstring(),
@@ -956,18 +953,12 @@ class ConnectorSourceNotify[In: Any val]
   // TODO [post-source-migration]: why pass source here instead of using
   // var _connector_source?
   fun _send_reply(source: (ConnectorSource[In] ref|None), msg: cwm.Message) =>
-    ifdef debug then
-      @printf[I32]("_send_reply\n".cstring())
-    end
     match source
     | let s: ConnectorSource[In] ref =>
       // write the frame data and length encode it
       let w1: Writer = w1.create()
       let b1 = cwm.Frame.encode(msg, w1)
       s.writev_final(Bytes.length_encode(b1))
-      ifdef debug then
-        @printf[I32]("_send_reply done\n".cstring())
-      end
     else
       Fail()
     end
