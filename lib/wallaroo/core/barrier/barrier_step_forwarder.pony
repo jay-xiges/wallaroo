@@ -125,13 +125,15 @@ class BarrierStepForwarder
       let b_token = _barrier_token
       clear()
       _step.barrier_complete(b_token)
-    end
-    @printf[I32]("!@ -- Remaining ids: \n".cstring())
-    for i in inputs.keys() do
-      if not _inputs_blocking.contains(i) then
-        @printf[I32]("%s, \n".cstring(), i.string().cstring())
+    else
+      @printf[I32]("!@ -- Remaining ids: \n".cstring())
+      for i in inputs.keys() do
+        if not _inputs_blocking.contains(i) then
+          @printf[I32]("%s, \n".cstring(), i.string().cstring())
+        end
       end
     end
+
 
   fun ref clear() =>
     _inputs_blocking.clear()

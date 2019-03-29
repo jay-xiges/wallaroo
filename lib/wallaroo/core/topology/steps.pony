@@ -359,6 +359,7 @@ actor Step is (Producer & Consumer & BarrierProcessor)
     _routes.contains(c)
 
   be register_producer(id: RoutingId, producer: Producer) =>
+    @printf[I32]("!@ Step %s registering upstream %s\n".cstring(), _id.string().cstring(), id.string().cstring())
     _inputs(id) = producer
     _upstreams.set(producer)
 
