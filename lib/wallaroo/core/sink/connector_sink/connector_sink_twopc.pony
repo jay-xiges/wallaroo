@@ -49,12 +49,13 @@ class ConnectorSink2PC
     current_offset = current_offset + encoded1_len
 
   fun ref reset_state() =>
-    ifdef "checkpoint_trace" then
-      @printf[I32]("2PC: reset 2PC state\n".cstring())
-    end
     state = cp.TwoPCFsmStart
     txn_id = ""
     barrier_token = CheckpointBarrierToken(0)
+    ifdef "checkpoint_trace" then
+      @printf[I32]("2PC: reset 2PC state\n".cstring())
+      @printf[I32]("2PC: set 2PC state => %d\n".cstring(), state())
+    end
 
   fun state_is_start(): Bool =>
     state is cp.TwoPCFsmStart
@@ -70,12 +71,21 @@ class ConnectorSink2PC
 
   fun ref set_state_commit() =>
     state = cp.TwoPCFsm2Commit
+    ifdef "checkpoint_trace" then
+      @printf[I32]("2PC: set 2PC state => %d\n".cstring(), state())
+    end
 
   fun ref set_state_commit_fast() =>
     state = cp.TwoPCFsm2CommitFast
+    ifdef "checkpoint_trace" then
+      @printf[I32]("2PC: set 2PC state => %d\n".cstring(), state())
+    end
 
   fun ref set_state_abort() =>
     state = cp.TwoPCFsm2Abort
+    ifdef "checkpoint_trace" then
+      @printf[I32]("2PC: set 2PC state => %d\n".cstring(), state())
+    end
 
   fun ref preemptive_txn_abort(sbt: CheckpointBarrierToken) =>
     txn_id = "preemptive txn abort"
@@ -162,10 +172,16 @@ class ConnectorSink2PC
         @printf[I32]("2PC: Wallaroo local abort for txn_id %s barrier %s\n".cstring(), txn_id_at_close.cstring(), barrier_token_at_close.string().cstring())
       end
 
-      set_state_abort()
+      // SLF TODO: if we disconnected, then that txn will be aborted
+      // by other parts of the system, e.g c_id=5.  However, we
+      // should not set_state_abort() here because when it's time for
+      // c_id=6, we shouldn't let 5's abort state affect 6's.
+      reset_state()
       txn_id = txn_id_at_close
       txn_id_at_close = ""
       barrier_token_at_close = barrier_token_initial
+    else
+      reset_state()
     end
 
   fun ref twopc_phase1_reply(txn_id': String, commit: Bool): Bool =>
