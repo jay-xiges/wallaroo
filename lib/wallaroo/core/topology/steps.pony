@@ -127,6 +127,8 @@ actor Step is (Producer & Consumer & BarrierProcessor)
       tr.set_triggers(StepTimeoutTrigger(this), _watermarks)
     end
 
+    @printf[I32]("!@ Step created id %s\n".cstring(), _id.string().cstring())
+
   //
   // Application startup lifecycle event
   //

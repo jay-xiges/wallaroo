@@ -83,6 +83,8 @@ actor BarrierSource is Source
     _metrics_reporter = consume metrics_reporter'
     _router_registry.register_producer(this)
 
+    @printf[I32]("!@ BarrierSource created id %s\n".cstring(), _source_id.string().cstring())
+
   be first_checkpoint_complete() =>
     None
 
@@ -193,21 +195,11 @@ actor BarrierSource is Source
     This method should only be called if we are removing this source from the
     active graph (or on dispose())
     """
-    let outputs_to_remove: Array[(String, RoutingId, Consumer)] =
-      outputs_to_remove.create()
     for (source, outputs) in _source_outputs.pairs() do
       for (id, consumer) in outputs.pairs() do
-        outputs_to_remove.push((source, id, consumer))
+        _unregister_output(source, id, consumer)
       end
     end
-    for (source, id, consumer) in outputs_to_remove.values() do
-      _unregister_output(source, id, consumer)
-    end
-    // for (source, outputs) in _source_outputs.pairs() do
-    //   for (id, consumer) in outputs.pairs() do
-    //     _unregister_output(source, id, consumer)
-    //   end
-    // end
 
   fun ref _unregister_output(source: String, id: RoutingId, c: Consumer) =>
     try

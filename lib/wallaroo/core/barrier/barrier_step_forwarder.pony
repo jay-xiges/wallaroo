@@ -110,6 +110,7 @@ class BarrierStepForwarder
     check_completion(_step.inputs())
 
   fun ref check_completion(inputs: Map[RoutingId, Producer] box) =>
+    @printf[I32]("!@ BarrierStepForwarder:check_completion(). inputs_size: %s, inputs_blocking_size: %s\n".cstring(), inputs.size().string().cstring(), _inputs_blocking.size().string().cstring())
     if inputs.size() == _inputs_blocking.size()
     then
       for (o_id, o) in _step.outputs().pairs() do
@@ -124,6 +125,12 @@ class BarrierStepForwarder
       let b_token = _barrier_token
       clear()
       _step.barrier_complete(b_token)
+    end
+    @printf[I32]("!@ -- Remaining ids: \n".cstring())
+    for i in inputs.values() do
+      if not _inputs_blocking.contains(i) then
+        @printf[I32]("%s, \n".cstring(), i.string().cstring())
+      end
     end
 
   fun ref clear() =>
