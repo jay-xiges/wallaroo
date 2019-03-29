@@ -87,7 +87,7 @@ actor AutoscaleInitiator
 
     //!@
     let t = Timer(_WaitForProducerRegistrations(_barrier_coordinator,
-      _current_autoscale_tokens.resume_token, barrier_promise), 1_000_000)
+      _current_autoscale_tokens.resume_token, barrier_promise), 100_000_000)
     _timers(consume t)
 
     //!@ Bring back
