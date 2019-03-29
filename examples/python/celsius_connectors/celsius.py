@@ -17,17 +17,37 @@ This is an example of a stateless application that takes a floating point
 Celsius value and sends out a floating point Fahrenheit value.
 """
 
+import logging
 import struct
 import wallaroo
 import wallaroo.experimental
 
+fmt = '%(asctime)s celsius %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s'
+logging.root.formatter = logging.Formatter(fmt)
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(logging.root.formatter)
+logging.root.addHandler(stream_handler)
+logging.root.setLevel(logging.INFO)
+
+class CelsiusGenerator(object):
+    """
+    Hackery to generate celsius values
+    """
+    def __init__(self, max=500):
+        self.max = max
+
+    def initial_value(self):
+        return -40.0
+
+    def apply(self, last_str):
+        last = float(last_str)
+        if last > self.max:
+            logging.info('CelsiusGenerator: stopping at max={}'.format(self.max))
+            return None
+        return last + 1.0
 
 def application_setup(args):
-    celsius_feed = wallaroo.experimental.SourceConnectorConfig(
-        "celsius_feed",
-        encoder=encode_feed,
-        decoder=decode_feed,
-        port=7100)
+    celsius_feed = wallaroo.GenSourceConfig(CelsiusGenerator(99999))
     fahrenheit_conversion = wallaroo.experimental.SinkConnectorConfig(
         "fahrenheit_conversion",
         encoder=encode_conversion,
@@ -50,6 +70,7 @@ def multiply(data):
 
 @wallaroo.computation(name="add 32")
 def add(data):
+    print('DBG: add {}'.format(data))
     return data + 32
 
 
