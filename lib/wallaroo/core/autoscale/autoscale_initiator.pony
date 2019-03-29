@@ -17,6 +17,7 @@ Copyright 2018 The Wallaroo Authors.
 */
 
 use "promises"
+use "time"
 use "wallaroo/core/common"
 use "wallaroo/core/barrier"
 use "wallaroo/core/checkpoint"
