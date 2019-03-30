@@ -550,8 +550,15 @@ actor ConnectorSink is Sink
       try @printf[I32]("2PC: DBGDBG: checkpoint_complete: commit, _twopc.last_offset %d _notify.twopc_txn_id_last_committed %s\n".cstring(), _twopc.last_offset, (_notify.twopc_txn_id_last_committed as String).cstring()) else Fail() end
     end
 
-    _notify.twopc_txn_id_last_committed = _twopc.txn_id
-    try @printf[I32]("DBGDBG: 2PC: twopc_txn_id_last_committed = %s.\n".cstring(), (_notify.twopc_txn_id_last_committed as String).cstring()) else Fail() end
+    if _twopc.txn_id == "" then
+      @printf[I32]("Error: checkpoint_complete() with empty _twopc.txn_id = %s.\n".cstring(), _twopc.txn_id.cstring())
+      Fail()
+    else
+      _notify.twopc_txn_id_last_committed = _twopc.txn_id
+      ifdef "checkpoint_trace" then
+        try @printf[I32]("2PC: DBGDBG: twopc_txn_id_last_committed = %s.\n".cstring(), (_notify.twopc_txn_id_last_committed as String).cstring()) else Fail() end
+      end
+    end
     _twopc.reset_state()
 
     _resume_processing_messages()
@@ -665,10 +672,13 @@ actor ConnectorSink is Sink
     // commit status: commit for checkpoint_id, all greater are invalid.
     _notify.twopc_txn_id_last_committed =
       _twopc.make_txn_id_string(checkpoint_id)
-    try @printf[I32]("DBGDBG: 2PC: twopc_txn_id_last_committed = %s.\n".cstring(), (_notify.twopc_txn_id_last_committed as String).cstring()) else Fail() end
-    _notify.process_uncommitted_list(this)
+    ifdef "checkpoint_trace" then
+      try @printf[I32]("DBGDBG: 2PC: twopc_txn_id_last_committed = %s.\n".cstring(), (_notify.twopc_txn_id_last_committed as String).cstring()) else Fail() end
+    end
+    _notify.twopc_current_txn_aborted = _notify.process_uncommitted_list(this)
 
     ifdef "checkpoint_trace" then
+      @printf[I32]("DBGDBG: 2PC: twopc_current_txn_aborted = %s.\n".cstring(), _notify.twopc_current_txn_aborted.string().cstring())
       @printf[I32]("2PC: Rollback: _twopc.last_offset %lu _twopc.current_offset %lu acked_point_of_ref %lu last committed txn %s at ConnectorSink %s\n".cstring(), _twopc.last_offset, _twopc.current_offset, _notify.acked_point_of_ref, try (_notify.twopc_txn_id_last_committed as String).cstring() else "<<<None>>>".string() end, _sink_id.string().cstring())
     end
 

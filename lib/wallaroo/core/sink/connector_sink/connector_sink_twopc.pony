@@ -152,7 +152,10 @@ class ConnectorSink2PC
   fun ref hard_close() =>
     txn_id_at_close = txn_id
     barrier_token_at_close = barrier_token
-    reset_state()
+    ifdef "checkpoint_trace" then
+      @printf[I32]("2PC: DBG: hard_close: state = %s, txn_id_at_close = %s, barrier_token_at_close = %s\n".cstring(), state().string().cstring(), txn_id_at_close.cstring(), barrier_token_at_close.string().cstring())
+    end
+    // Do not reset_state() here.  Wait (typically) until 2PC intro is done.
 
   fun make_txn_id_string(checkpoint_id: CheckpointId): String =>
     stream_name + ":c_id=" + checkpoint_id.string()
