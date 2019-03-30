@@ -293,6 +293,7 @@ actor ConnectorSink is Sink
         try
           let w1: Writer = w1.create()
           let msg = _notify.make_message(encoded1)?
+          try @printf[I32]("DBGDBG: make_message message_id=%d\n".cstring(), msg.message_id as cp.MessageId) else Fail() end
           let bs = cp.Frame.encode(msg, w1)
           Bytes.length_encode(bs)
         else
@@ -550,6 +551,7 @@ actor ConnectorSink is Sink
     end
 
     _notify.twopc_txn_id_last_committed = _twopc.txn_id
+    try @printf[I32]("DBGDBG: 2PC: twopc_txn_id_last_committed = %s.\n".cstring(), (_notify.twopc_txn_id_last_committed as String).cstring()) else Fail() end
     _twopc.reset_state()
 
     _resume_processing_messages()
@@ -663,6 +665,7 @@ actor ConnectorSink is Sink
     // commit status: commit for checkpoint_id, all greater are invalid.
     _notify.twopc_txn_id_last_committed =
       _twopc.make_txn_id_string(checkpoint_id)
+    try @printf[I32]("DBGDBG: 2PC: twopc_txn_id_last_committed = %s.\n".cstring(), (_notify.twopc_txn_id_last_committed as String).cstring()) else Fail() end
     _notify.process_uncommitted_list(this)
 
     ifdef "checkpoint_trace" then

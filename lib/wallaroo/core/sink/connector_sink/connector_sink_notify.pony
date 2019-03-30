@@ -224,7 +224,7 @@ class ConnectorSinkNotify
       end
       if twopc_current_txn_aborted then
         ifdef "checkpoint_trace" then
-          @printf[I32]("DBGDBG: unthrot tled: buffer: twopc_current_txn_aborted = %s discard %d items\n".cstring(), twopc_current_txn_aborted.string().cstring(), twopc_reconnect_buffer.size())
+          @printf[I32]("DBGDBG: unthrottled: buffer: twopc_current_txn_aborted = %s discard %d items\n".cstring(), twopc_current_txn_aborted.string().cstring(), twopc_reconnect_buffer.size())
         end
         None
       else
@@ -472,6 +472,7 @@ class ConnectorSinkNotify
       // are starting for the first time.  There is no prior committed
       // txn_id.
       twopc_txn_id_last_committed = ""
+      try @printf[I32]("DBGDBG: 2PC: twopc_txn_id_last_committed = %s.\n".cstring(), (twopc_txn_id_last_committed as String).cstring()) else Fail() end
       process_uncommitted_list(conn)
     end
 

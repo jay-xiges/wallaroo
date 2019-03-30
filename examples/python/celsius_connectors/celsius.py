@@ -47,7 +47,7 @@ class CelsiusGenerator(object):
         return last + 1.0
 
 def application_setup(args):
-    celsius_feed = wallaroo.GenSourceConfig(CelsiusGenerator(99999))
+    celsius_feed = wallaroo.GenSourceConfig(CelsiusGenerator(999999))
     fahrenheit_conversion = wallaroo.experimental.SinkConnectorConfig(
         "fahrenheit_conversion",
         encoder=encode_conversion,
