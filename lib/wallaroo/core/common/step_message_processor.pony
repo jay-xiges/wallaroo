@@ -24,6 +24,7 @@ use "wallaroo/core/topology"
 use "wallaroo/core/barrier"
 use "wallaroo/core/checkpoint"
 
+//!@ TODO: Rename this StepPhase
 trait StepMessageProcessor
   fun ref run[D: Any val](metric_name: String, pipeline_time_spent: U64,
     data: D, key: Key, event_ts: U64, watermark_ts: U64,

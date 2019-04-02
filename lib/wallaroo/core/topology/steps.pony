@@ -52,6 +52,7 @@ actor Step is (Producer & Consumer & BarrierProcessor)
   let _event_log: EventLog
   var _seq_id_generator: StepSeqIdGenerator = StepSeqIdGenerator
 
+  //!@ TODO: Rename this _phase
   var _step_message_processor: StepMessageProcessor = EmptyStepMessageProcessor
 
   // _routes contains one route per Consumer
