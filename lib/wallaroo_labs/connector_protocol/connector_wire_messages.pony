@@ -466,7 +466,6 @@ primitive TwoPCFrame
 primitive TwoPCFrameTag
   fun decode(rb: Reader): TwoPCMessage ? =>
     let frame_tag = rb.u8()?
-@printf[I32]("QQQ DBG: frame_tag %d\n".cstring(), frame_tag)
     match frame_tag
     | 201 => ListUncommittedMsg.decode(rb)?
     | 202 => ReplyUncommittedMsg.decode(consume rb)?

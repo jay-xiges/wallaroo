@@ -293,7 +293,6 @@ actor ConnectorSink is Sink
         try
           let w1: Writer = w1.create()
           let msg = _notify.make_message(encoded1)?
-          try @printf[I32]("DBGDBG: make_message message_id=%d\n".cstring(), msg.message_id as cp.MessageId) else Fail() end
           let bs = cp.Frame.encode(msg, w1)
           Bytes.length_encode(bs)
         else

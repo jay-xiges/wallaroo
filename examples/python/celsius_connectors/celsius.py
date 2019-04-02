@@ -70,7 +70,6 @@ def multiply(data):
 
 @wallaroo.computation(name="add 32")
 def add(data):
-    print('DBG: add {}'.format(data))
     return data + 32
 
 
