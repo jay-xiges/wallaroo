@@ -12,7 +12,9 @@ import sys
 import time
 import traceback
 
-import boto3
+if os.environ.get('USE_FAKE_S3', '') == 'on':
+    import boto3
+
 
 # NOTES:
 #

@@ -62,9 +62,9 @@ use @pony_asio_event_destroy[None](event: AsioEventID)
 primitive _ConnectTimeout
   fun apply(): U64 =>
     ifdef debug then
-      500_000_000
+      100_000_000
     else
-      10_000_000_000
+      1_000_000_000
     end
 
 actor ConnectorSink is Sink
